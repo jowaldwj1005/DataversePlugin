@@ -15,10 +15,16 @@
 - [x] Bulk Ops: JSON paste panel as primary entry point with inline metadata API example
 - [x] `privilegedepthmask` null guard in security inspector
 
+## Recently Fixed
+- [x] Power Automate code generation from visual model → HTTP action + Parse JSON schema block (attrs from cache → itemProperties per selected column; FetchXML stored as variable; steps commented)
+- [x] Code gen dropdown added to FetchXML toolbar: C# / JavaScript / Power Automate → shows modal with copy button
+- [x] ERD `_loadSolution`: removed stale `compResp.data || compResp` wrapper
+- [x] ERD relationship arrows: `<title>` tooltip with SchemaName + entity names + ReferencedAttribute; dashed/dotted style per rel type
+- [x] Settings tab: already persisted to `chrome.storage.local` — verified done
+
 ## Planned – Next Priority
 
 ### FetchXML Builder
-- [ ] Power Automate code generation from visual model → HTTP action + Parse JSON schema block
 - [ ] OData output: verify/fix `$expand` for N:N relationships (navigationProp may be missing)
 - [ ] "Add sort" drag handle UX
 
@@ -27,9 +33,8 @@
 - [ ] Field Security tab: verify `fieldsecurityprofile` + `fieldpermission` queries work
 
 ### ERD Viewer
-- [ ] Relationship arrows: hover tooltip with schema name
-- [ ] Export Schema: JSON Schema draft-07 format per entity
-- [ ] Export Payload: example POST body with placeholder values per attribute type
+- [ ] Export Schema: refine to JSON Schema draft-07 format (currently outputs custom shape)
+- [ ] Export Payload: currently only exports required fields — consider option for all writable fields
 
 ### Explorer
 - [ ] Actions / Functions nodes: load parameters and show in detail panel
@@ -37,8 +42,6 @@
 
 ### General
 - [ ] Icons (16x16, 48x48, 128x128) — extension shows default icon
-- [ ] Settings tab: persist theme, cache TTL, default page size to `chrome.storage.local`
-- [ ] Code generation (FetchXML → Power Automate) from model not XML
 
 ## Known API Constraints
 - `$orderby` not supported on metadata endpoints → sort client-side

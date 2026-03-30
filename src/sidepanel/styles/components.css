@@ -2605,6 +2605,40 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 .qb-results-table tr:hover td { background: var(--color-bg-hover); }
 .qb-cell-null { color: var(--color-text-disabled); font-style: italic; }
 
+/* Code generation modal */
+.qb-code-modal {
+  max-width: 720px;
+  width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.qb-code-block {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-code-bg, #1e1e1e);
+  color: var(--color-text-primary);
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 12px 16px;
+  margin: 0;
+  white-space: pre;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 200px;
+  max-height: 60vh;
+}
+
+.qb-modal-footer {
+  padding: 8px 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* Notifications */
 .qb-notification {
   padding: 8px 14px;

@@ -9,7 +9,10 @@
       "Bash(grep \"rb-action-bar\\\\|rb-body-editor\\\\|rb-headers\\\\|rb-method-select\\\\|rb-response\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/styles/*.css)",
       "Bash(grep -E \"\\\\.request-builder|\\\\.rb-|\\\\.fetchxml-|\\\\.bulk-operations|\\\\.bulk-|\\\\.dvt-security\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/styles/*.css)",
       "Bash(grep -c \"className = ''rb-\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/modules/request-builder.js)",
-      "Bash(cut -d'{' -f1)"
+      "Bash(cut -d'{' -f1)",
+      "Bash(git commit:*)",
+      "Bash(git gc:*)",
+      "Bash(git config:*)"
     ]
   }
 }

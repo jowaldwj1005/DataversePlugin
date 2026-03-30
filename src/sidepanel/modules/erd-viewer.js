@@ -237,8 +237,7 @@ export default class ErdViewer {
       const compResp = await this.api.request('GET',
         `solutioncomponents?$filter=solutionid/uniquename eq '${uniqueName}' and componenttype eq 1&$select=objectid`
       );
-      const compData = compResp.data || compResp;
-      const objectIds = (compData.value || []).map(c => c.objectid).filter(Boolean);
+      const objectIds = (compResp.value || []).map(c => c.objectid).filter(Boolean);
 
       if (!objectIds.length) {
         this._showNotification('No entities found in this solution', 'warning');
@@ -398,17 +397,35 @@ export default class ErdViewer {
     const fy = fromPos.y + ENTITY_H / 2;
     const tx = toPos.x;
     const ty = toPos.y + ENTITY_H / 2;
-
     const midX = (fx + tx) / 2;
 
-    const path = svgEl('path', {
+    const relType = rel._type || '1:N';
+    const dashArray = relType === 'N:N' ? '3 3' : relType === 'N:1' ? '6 3' : null;
+    const markerId = relType === 'N:1' ? 'arrow-end-dashed' : 'arrow-end';
+
+    const g = svgEl('g', { class: 'erd-arrow-group' });
+
+    // Tooltip — shows on hover via native SVG <title>
+    const tooltipParts = [rel.SchemaName || ''];
+    if (rel.ReferencedEntity && rel.ReferencingEntity) {
+      tooltipParts.push(`${rel.ReferencedEntity} → ${rel.ReferencingEntity}`);
+    }
+    if (rel.ReferencedAttribute) tooltipParts.push(`on: ${rel.ReferencedAttribute}`);
+
+    const title = svgEl('title');
+    title.textContent = tooltipParts.filter(Boolean).join('\n');
+    g.appendChild(title);
+
+    const pathAttrs = {
       d: `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`,
       class: 'erd-arrow',
       fill: 'none',
-      'marker-end': 'url(#arrow-end)',
-    });
+      'marker-end': `url(#${markerId})`,
+    };
+    if (dashArray) pathAttrs['stroke-dasharray'] = dashArray;
 
-    return path;
+    g.appendChild(svgEl('path', pathAttrs));
+    return g;
   }
 
   // -------------------------------------------------------------------------

@@ -556,17 +556,107 @@ Xrm.WebApi.retrieveMultipleRecords("${entitySetName}", \`?fetchXml=\${encodedFet
 );`;
 }
 
-function generatePowerAutomate(baseUrl, entitySetName, fetchXml) {
-  const action = {
-    type: 'OpenApiConnection',
+/**
+ * Generate Power Automate flow steps from a visual query model.
+ *
+ * Returns a string containing:
+ *  1. The raw FetchXML (to store in a variable)
+ *  2. An HTTP action definition that calls the Dataverse Web API
+ *  3. A Parse JSON action definition with a schema derived from the selected columns
+ *
+ * @param {Object} model        - FetchModel from the visual builder
+ * @param {string} entitySetName
+ * @param {string} baseUrl      - Org URL, e.g. https://org.crm.dynamics.com
+ * @param {Array}  attrs        - AttributeMetadata[] for the entity (used to map types)
+ * @returns {string}
+ */
+function generatePowerAutomate(model, entitySetName, baseUrl, attrs) {
+  const xml = modelToXml(model);
+
+  // Map Dataverse attribute types to JSON Schema primitive types
+  const toJsonType = (dvType) => {
+    switch (dvType) {
+      case 'Integer': case 'BigInt': case 'Decimal': case 'Double': case 'Money':
+        return 'number';
+      case 'Boolean':
+        return 'boolean';
+      default:
+        return 'string';
+    }
+  };
+
+  // Build the properties object for the Parse JSON schema
+  const selectedNames = model.allAttributes
+    ? attrs.map(a => a.LogicalName)
+    : (model.attributes || []).map(a => a.name).filter(Boolean);
+
+  const itemProperties = { '@odata.etag': { type: 'string' } };
+  for (const name of selectedNames) {
+    const meta = attrs.find(a => a.LogicalName === name);
+    itemProperties[name] = { type: toJsonType(meta?.AttributeType) };
+  }
+
+  // Also include any lookup _xxx_value fields that Dataverse auto-adds
+  for (const name of selectedNames) {
+    const meta = attrs.find(a => a.LogicalName === name);
+    if (meta?.AttributeType === 'Lookup' || meta?.AttributeType === 'Owner' || meta?.AttributeType === 'Customer') {
+      itemProperties[`_${name}_value`] = { type: 'string' };
+    }
+  }
+
+  const apiUrl = `${baseUrl}/api/data/v9.2/${entitySetName}`;
+
+  const httpAction = {
+    type: 'Http',
     inputs: {
-      host: { connectionName: 'shared_commondataserviceforapps' },
-      method: 'get',
-      path: `/${entitySetName}`,
-      queries: { fetchXml },
+      method: 'GET',
+      uri: `${apiUrl}?fetchXml=@{encodeUriComponent(variables('FetchXml'))}`,
+      authentication: {
+        type: 'ActiveDirectoryOAuth',
+        tenant: "@variables('TenantId')",
+        audience: baseUrl || 'https://<org>.crm.dynamics.com',
+        clientId: "@variables('ClientId')",
+        secret: "@variables('ClientSecret')",
+      },
+      headers: {
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Accept: 'application/json',
+        Prefer: 'odata.include-annotations="*"',
+      },
     },
   };
-  return JSON.stringify(action, null, 2);
+
+  const parseJsonAction = {
+    type: 'ParseJson',
+    inputs: {
+      content: "@body('HTTP')",
+      schema: {
+        type: 'object',
+        properties: {
+          '@odata.context': { type: 'string' },
+          value: {
+            type: 'array',
+            items: { type: 'object', properties: itemProperties },
+          },
+        },
+      },
+    },
+  };
+
+  return [
+    '// ── Step 0: Initialize variable ───────────────────────────────────────',
+    '// Add an "Initialize variable" action named FetchXml with this value:',
+    xml,
+    '',
+    '// ── Step 1: HTTP action ────────────────────────────────────────────────',
+    '// Paste this into the HTTP action\'s "Code view" (rename action to "HTTP")',
+    JSON.stringify(httpAction, null, 2),
+    '',
+    '// ── Step 2: Parse JSON action ─────────────────────────────────────────',
+    '// Paste this schema into the Parse JSON "Code view"',
+    JSON.stringify(parseJsonAction, null, 2),
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +875,11 @@ export class FetchXmlBuilder {
       const ent = this._entities.find(e => e.LogicalName === this.model.entity);
       this._copyToClipboard(modelToOData(this.model, ent?.EntitySetName || `${this.model.entity}s`));
     });
-    toolbar.append(copyXmlBtn, copyOdBtn);
+
+    const codeBtn = this._createButton('\u276F\_ Code', 'qb-btn qb-btn-secondary', () => this._showCodeGenMenu(codeBtn));
+    codeBtn.title = 'Generate code (C#, JavaScript, Power Automate)';
+
+    toolbar.append(copyXmlBtn, copyOdBtn, codeBtn);
     this.container.appendChild(toolbar);
 
     // Canvas
@@ -1563,6 +1657,123 @@ export class FetchXmlBuilder {
       }
     };
     setTimeout(() => document.addEventListener('click', close, true), 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Code generation menu + modal
+  // -------------------------------------------------------------------------
+
+  _showCodeGenMenu(anchor) {
+    const existing = document.getElementById('qb-code-menu');
+    if (existing) { existing.remove(); return; }
+
+    if (!this.model.entity) {
+      this._showNotification('Select an entity first', 'warning');
+      return;
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'qb-code-menu';
+    menu.className = 'qb-dropdown-menu';
+
+    const items = [
+      {
+        label: 'C# \u2014 FetchExpression',
+        generate: () => generateCSharp(modelToXml(this.model)),
+      },
+      {
+        label: 'JavaScript \u2014 Xrm.WebApi',
+        generate: () => {
+          const ent = this._entities.find(e => e.LogicalName === this.model.entity);
+          return generateJavaScript(modelToXml(this.model), ent?.EntitySetName || `${this.model.entity}s`);
+        },
+      },
+      {
+        label: 'Power Automate \u2014 HTTP + Parse JSON',
+        generate: async () => {
+          const err = this._validateModel(this.model);
+          if (err) { this._showNotification(err, 'error'); return null; }
+          const ent = this._entities.find(e => e.LogicalName === this.model.entity);
+          const entitySetName = ent?.EntitySetName || `${this.model.entity}s`;
+          let baseUrl = '';
+          try {
+            const env = await this.api.getEnvironment();
+            baseUrl = env?.url || '';
+          } catch { /* leave empty */ }
+          const attrs = this._attrCache.get(this.model.entity) || [];
+          return generatePowerAutomate(this.model, entitySetName, baseUrl, attrs);
+        },
+      },
+    ];
+
+    for (const item of items) {
+      const div = document.createElement('div');
+      div.className = 'qb-dropdown-item';
+      div.textContent = item.label;
+      div.addEventListener('click', async () => {
+        menu.remove();
+        try {
+          const code = await item.generate();
+          if (code != null) this._showCodeModal(item.label, code);
+        } catch (err) {
+          this._showNotification(`Code generation failed: ${err.message}`, 'error');
+        }
+      });
+      menu.appendChild(div);
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    const containerRect = this.container.getBoundingClientRect();
+    menu.style.top = `${rect.bottom - containerRect.top}px`;
+    menu.style.left = `${rect.left - containerRect.left}px`;
+    this.container.style.position = 'relative';
+    this.container.appendChild(menu);
+
+    const close = (e) => {
+      if (!menu.contains(e.target) && e.target !== anchor) {
+        menu.remove();
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  }
+
+  _showCodeModal(title, code) {
+    document.getElementById('qb-code-modal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'qb-code-modal';
+    overlay.className = 'qb-modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'qb-modal qb-code-modal';
+
+    const header = document.createElement('div');
+    header.className = 'qb-modal-header';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = title;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'qb-modal-close';
+    closeBtn.textContent = '\u00D7';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.append(titleSpan, closeBtn);
+
+    const pre = document.createElement('pre');
+    pre.className = 'qb-code-block';
+    pre.textContent = code;
+
+    const footer = document.createElement('div');
+    footer.className = 'qb-modal-footer';
+    const copyBtn = this._createButton('Copy to Clipboard', 'qb-btn qb-btn-primary', () => {
+      this._copyToClipboard(code);
+      this._showNotification('Copied to clipboard', 'success');
+    });
+    footer.appendChild(copyBtn);
+
+    modal.append(header, pre, footer);
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   }
 
   // -------------------------------------------------------------------------
