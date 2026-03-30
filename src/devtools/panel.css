@@ -1,0 +1,344 @@
+/**
+ * Dataverse Toolkit - DevTools Panel Styles
+ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+
+.dvt-devtools {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Toolbar */
+.dvt-devtools-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.dvt-devtools-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dvt-devtools-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dvt-devtools-btn {
+  padding: 4px 10px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #ccc;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.dvt-devtools-btn:hover {
+  background: #3c3c3c;
+}
+
+.dvt-devtools-select {
+  padding: 4px 6px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #ccc;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+}
+
+.dvt-devtools-select:focus {
+  border-color: #0078d4;
+}
+
+.dvt-devtools-search {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 8px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #3c3c3c;
+  color: #ccc;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+}
+
+.dvt-devtools-search:focus {
+  border-color: #0078d4;
+}
+
+.dvt-devtools-search::placeholder {
+  color: #666;
+}
+
+/* Performance summary */
+.dvt-devtools-perf {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 10px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.dvt-devtools-perf-errors.has-errors {
+  color: #f48771;
+  font-weight: 600;
+}
+
+/* Request list */
+.dvt-devtools-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.dvt-devtools-empty {
+  padding: 24px;
+  text-align: center;
+  color: #666;
+  font-size: 12px;
+}
+
+.dvt-devtools-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #2a2a2a;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 11px;
+}
+
+.dvt-devtools-row:hover {
+  background: #2a2d35;
+}
+
+.dvt-devtools-row.selected {
+  background: #264f78;
+}
+
+/* Method badge */
+.dvt-devtools-method {
+  display: inline-block;
+  width: 52px;
+  text-align: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.dvt-devtools-method.get {
+  background: #1b3a2e;
+  color: #4ec9b0;
+}
+
+.dvt-devtools-method.post {
+  background: #3a2d1b;
+  color: #dcdcaa;
+}
+
+.dvt-devtools-method.patch {
+  background: #1b2d3a;
+  color: #569cd6;
+}
+
+.dvt-devtools-method.put {
+  background: #2d1b3a;
+  color: #c586c0;
+}
+
+.dvt-devtools-method.delete {
+  background: #3a1b1b;
+  color: #f48771;
+}
+
+/* URL */
+.dvt-devtools-url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ccc;
+  min-width: 0;
+}
+
+/* Status */
+.dvt-devtools-status {
+  width: 36px;
+  text-align: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.dvt-devtools-status.success {
+  color: #4ec9b0;
+}
+
+.dvt-devtools-status.redirect {
+  color: #dcdcaa;
+}
+
+.dvt-devtools-status.client-error {
+  color: #f48771;
+}
+
+.dvt-devtools-status.server-error {
+  color: #f44747;
+}
+
+.dvt-devtools-status.error {
+  color: #f44747;
+}
+
+/* Duration */
+.dvt-devtools-duration {
+  width: 60px;
+  text-align: right;
+  color: #888;
+  flex-shrink: 0;
+}
+
+/* Size */
+.dvt-devtools-size {
+  width: 60px;
+  text-align: right;
+  color: #666;
+  flex-shrink: 0;
+}
+
+/* Timestamp */
+.dvt-devtools-time {
+  width: 80px;
+  text-align: right;
+  color: #555;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+/* Detail panel */
+.dvt-devtools-detail {
+  border-top: 2px solid #0078d4;
+  max-height: 50vh;
+  overflow-y: auto;
+  background: #1e1e1e;
+  flex-shrink: 0;
+}
+
+.dvt-devtools-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.dvt-devtools-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dvt-devtools-detail-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.dvt-devtools-detail-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.dvt-devtools-code {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  color: #ccc;
+}
+
+.dvt-devtools-url-full {
+  color: #9cdcfe;
+  word-break: break-all;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Selection */
+::selection {
+  background: rgba(38, 79, 120, 0.6);
+}

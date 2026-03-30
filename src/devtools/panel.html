@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dataverse - DevTools</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <div id="panel" class="dvt-devtools">
+    <!-- Toolbar -->
+    <div class="dvt-devtools-toolbar">
+      <div class="dvt-devtools-toolbar-left">
+        <button id="btn-clear" class="dvt-devtools-btn" title="Clear log">Clear</button>
+
+        <select id="filter-method" class="dvt-devtools-select" title="Filter by method">
+          <option value="">All Methods</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PATCH">PATCH</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+
+        <select id="filter-status" class="dvt-devtools-select" title="Filter by status">
+          <option value="">All Status</option>
+          <option value="success">Success (2xx)</option>
+          <option value="client-error">Client Error (4xx)</option>
+          <option value="server-error">Server Error (5xx)</option>
+        </select>
+
+        <input id="filter-search" type="text" class="dvt-devtools-search"
+               placeholder="Search URL or entity..." />
+      </div>
+      <div class="dvt-devtools-toolbar-right">
+        <button id="btn-export" class="dvt-devtools-btn" title="Export log">Export</button>
+      </div>
+    </div>
+
+    <!-- Performance summary -->
+    <div id="perf-summary" class="dvt-devtools-perf">
+      <span id="perf-count">0 requests</span>
+      <span id="perf-avg">Avg: 0ms</span>
+      <span id="perf-errors">0 errors</span>
+    </div>
+
+    <!-- Request list -->
+    <div id="request-list" class="dvt-devtools-list">
+      <div class="dvt-devtools-empty">
+        Waiting for Dataverse Web API requests...
+      </div>
+    </div>
+
+    <!-- Request detail panel -->
+    <div id="request-detail" class="dvt-devtools-detail" style="display: none;">
+    </div>
+  </div>
+
+  <script src="panel.js" type="module"></script>
+</body>
+</html>

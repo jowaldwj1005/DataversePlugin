@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/modules/*.js)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(wc -l /c/Users/jwald/CodeReps/DataversePlugin/src/**/*.js /c/Users/jwald/CodeReps/DataversePlugin/src/**/**/*.js /c/Users/jwald/CodeReps/DataversePlugin/src/**/**/**/*.js)",
+      "Bash(grep -l \"fetchxml-toolbar\\\\|bulk-toolbar\\\\|request-builder\\\\|rb-url-section\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/styles/*.css)",
+      "Bash(grep \"rb-action-bar\\\\|rb-body-editor\\\\|rb-headers\\\\|rb-method-select\\\\|rb-response\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/styles/*.css)",
+      "Bash(grep -E \"\\\\.request-builder|\\\\.rb-|\\\\.fetchxml-|\\\\.bulk-operations|\\\\.bulk-|\\\\.dvt-security\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/styles/*.css)",
+      "Bash(grep -c \"className = ''rb-\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/modules/request-builder.js)",
+      "Bash(cut -d'{' -f1)"
+    ]
+  }
+}

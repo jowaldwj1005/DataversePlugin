@@ -1,0 +1,440 @@
+/* ================================================================
+   Dataverse Toolkit - Theme Definitions
+   ================================================================
+   Three themes: dark (default), light, high-contrast
+   Uses CSS custom properties on [data-theme] for runtime switching.
+   System preference detection via prefers-color-scheme.
+   ================================================================ */
+
+/* ----------------------------------------------------------------
+   Dark Theme (VS Code Dark+ inspired) - DEFAULT
+   ---------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  /* Surfaces */
+  --color-bg-base: #1e1e1e;
+  --color-bg-sidebar: #252526;
+  --color-bg-panel: #2d2d2d;
+  --color-bg-input: #3c3c3c;
+  --color-bg-hover: #333333;
+  --color-bg-active: #37373d;
+  --color-bg-selected: #094771;
+  --color-bg-overlay: rgba(0, 0, 0, 0.5);
+  --color-bg-tooltip: #383838;
+  --color-bg-dropdown: #252526;
+  --color-bg-card: #2d2d2d;
+  --color-bg-badge: #4d4d4d;
+
+  /* Text */
+  --color-text-primary: #cccccc;
+  --color-text-bright: #ffffff;
+  --color-text-muted: #808080;
+  --color-text-disabled: #5a5a5a;
+  --color-text-inverse: #1e1e1e;
+  --color-text-link: #4fc1ff;
+
+  /* Accent */
+  --color-accent-primary: #0078d4;
+  --color-accent-primary-hover: #1a8ae8;
+  --color-accent-primary-active: #005a9e;
+  --color-accent-secondary: #569cd6;
+  --color-accent-link: #4fc1ff;
+
+  /* Semantic */
+  --color-success: #4ec9b0;
+  --color-success-bg: rgba(78, 201, 176, 0.12);
+  --color-success-border: rgba(78, 201, 176, 0.3);
+  --color-warning: #dcdcaa;
+  --color-warning-bg: rgba(220, 220, 170, 0.12);
+  --color-warning-border: rgba(220, 220, 170, 0.3);
+  --color-error: #f44747;
+  --color-error-bg: rgba(244, 71, 71, 0.12);
+  --color-error-border: rgba(244, 71, 71, 0.3);
+  --color-info: #4fc1ff;
+  --color-info-bg: rgba(79, 193, 255, 0.12);
+  --color-info-border: rgba(79, 193, 255, 0.3);
+
+  /* Borders */
+  --color-border: #404040;
+  --color-border-subtle: #333333;
+  --color-border-strong: #555555;
+  --color-border-focus: #007fd4;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.6);
+
+  /* Scrollbar */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(121, 121, 121, 0.4);
+  --scrollbar-thumb-hover: rgba(121, 121, 121, 0.7);
+
+  /* HTTP Methods */
+  --color-method-get: #4ec9b0;
+  --color-method-get-bg: rgba(78, 201, 176, 0.15);
+  --color-method-post: #569cd6;
+  --color-method-post-bg: rgba(86, 156, 214, 0.15);
+  --color-method-patch: #ce9178;
+  --color-method-patch-bg: rgba(206, 145, 120, 0.15);
+  --color-method-delete: #f44747;
+  --color-method-delete-bg: rgba(244, 71, 71, 0.15);
+  --color-method-put: #dcdcaa;
+  --color-method-put-bg: rgba(220, 220, 170, 0.15);
+
+  /* Syntax - JSON */
+  --syntax-json-key: #9cdcfe;
+  --syntax-json-string: #ce9178;
+  --syntax-json-number: #b5cea8;
+  --syntax-json-boolean: #569cd6;
+  --syntax-json-null: #f44747;
+  --syntax-json-bracket: #ffd700;
+
+  /* Syntax - XML */
+  --syntax-xml-tag: #569cd6;
+  --syntax-xml-attr: #9cdcfe;
+  --syntax-xml-value: #ce9178;
+  --syntax-xml-comment: #6a9955;
+  --syntax-xml-bracket: #808080;
+
+  /* Tree / Explorer */
+  --tree-indent-guide: #404040;
+  --tree-indent-guide-active: #606060;
+
+  /* Skeleton / Loading */
+  --skeleton-base: #2d2d2d;
+  --skeleton-shimmer: #3c3c3c;
+
+  /* Focus */
+  --focus-ring: 0 0 0 2px var(--color-border-focus);
+
+  /* Transitions */
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
+  --transition-slow: 0.25s ease;
+
+  /* Radius */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  /* Spacing scale */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+
+  /* Z-index scale */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  /* Backdrop blur */
+  --backdrop-blur: blur(8px);
+}
+
+/* ----------------------------------------------------------------
+   Light Theme
+   ---------------------------------------------------------------- */
+[data-theme="light"] {
+  /* Surfaces */
+  --color-bg-base: #ffffff;
+  --color-bg-sidebar: #f3f3f3;
+  --color-bg-panel: #f8f8f8;
+  --color-bg-input: #ffffff;
+  --color-bg-hover: #e8e8e8;
+  --color-bg-active: #d6ebff;
+  --color-bg-selected: #d6ebff;
+  --color-bg-overlay: rgba(0, 0, 0, 0.3);
+  --color-bg-tooltip: #2d2d2d;
+  --color-bg-dropdown: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-badge: #e0e0e0;
+
+  /* Text */
+  --color-text-primary: #333333;
+  --color-text-bright: #000000;
+  --color-text-muted: #717171;
+  --color-text-disabled: #a0a0a0;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #0066bf;
+
+  /* Accent */
+  --color-accent-primary: #0078d4;
+  --color-accent-primary-hover: #106ebe;
+  --color-accent-primary-active: #005a9e;
+  --color-accent-secondary: #0366d6;
+  --color-accent-link: #0066bf;
+
+  /* Semantic */
+  --color-success: #107c10;
+  --color-success-bg: rgba(16, 124, 16, 0.08);
+  --color-success-border: rgba(16, 124, 16, 0.25);
+  --color-warning: #a67c00;
+  --color-warning-bg: rgba(166, 124, 0, 0.08);
+  --color-warning-border: rgba(166, 124, 0, 0.25);
+  --color-error: #d13438;
+  --color-error-bg: rgba(209, 52, 56, 0.08);
+  --color-error-border: rgba(209, 52, 56, 0.25);
+  --color-info: #0078d4;
+  --color-info-bg: rgba(0, 120, 212, 0.08);
+  --color-info-border: rgba(0, 120, 212, 0.25);
+
+  /* Borders */
+  --color-border: #d4d4d4;
+  --color-border-subtle: #e5e5e5;
+  --color-border-strong: #b0b0b0;
+  --color-border-focus: #0078d4;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+  --shadow-overlay: 0 12px 40px rgba(0, 0, 0, 0.2);
+
+  /* Scrollbar */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(100, 100, 100, 0.3);
+  --scrollbar-thumb-hover: rgba(100, 100, 100, 0.5);
+
+  /* HTTP Methods */
+  --color-method-get: #107c10;
+  --color-method-get-bg: rgba(16, 124, 16, 0.1);
+  --color-method-post: #0078d4;
+  --color-method-post-bg: rgba(0, 120, 212, 0.1);
+  --color-method-patch: #c47b00;
+  --color-method-patch-bg: rgba(196, 123, 0, 0.1);
+  --color-method-delete: #d13438;
+  --color-method-delete-bg: rgba(209, 52, 56, 0.1);
+  --color-method-put: #8a6914;
+  --color-method-put-bg: rgba(138, 105, 20, 0.1);
+
+  /* Syntax - JSON */
+  --syntax-json-key: #0451a5;
+  --syntax-json-string: #a31515;
+  --syntax-json-number: #098658;
+  --syntax-json-boolean: #0000ff;
+  --syntax-json-null: #d13438;
+  --syntax-json-bracket: #333333;
+
+  /* Syntax - XML */
+  --syntax-xml-tag: #800000;
+  --syntax-xml-attr: #ff0000;
+  --syntax-xml-value: #0451a5;
+  --syntax-xml-comment: #008000;
+  --syntax-xml-bracket: #800000;
+
+  /* Tree / Explorer */
+  --tree-indent-guide: #d4d4d4;
+  --tree-indent-guide-active: #b0b0b0;
+
+  /* Skeleton / Loading */
+  --skeleton-base: #e8e8e8;
+  --skeleton-shimmer: #f5f5f5;
+}
+
+/* ----------------------------------------------------------------
+   High Contrast Theme
+   ---------------------------------------------------------------- */
+[data-theme="high-contrast"] {
+  /* Surfaces */
+  --color-bg-base: #000000;
+  --color-bg-sidebar: #000000;
+  --color-bg-panel: #000000;
+  --color-bg-input: #000000;
+  --color-bg-hover: #1a1a1a;
+  --color-bg-active: #0c3668;
+  --color-bg-selected: #0c3668;
+  --color-bg-overlay: rgba(0, 0, 0, 0.7);
+  --color-bg-tooltip: #1a1a1a;
+  --color-bg-dropdown: #0c0c0c;
+  --color-bg-card: #000000;
+  --color-bg-badge: #333333;
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  --color-text-bright: #ffffff;
+  --color-text-muted: #c0c0c0;
+  --color-text-disabled: #6b6b6b;
+  --color-text-inverse: #000000;
+  --color-text-link: #6fc3ff;
+
+  /* Accent */
+  --color-accent-primary: #1aebff;
+  --color-accent-primary-hover: #6ff0ff;
+  --color-accent-primary-active: #00b4cc;
+  --color-accent-secondary: #6fc3ff;
+  --color-accent-link: #6fc3ff;
+
+  /* Semantic */
+  --color-success: #00ff00;
+  --color-success-bg: rgba(0, 255, 0, 0.1);
+  --color-success-border: #00ff00;
+  --color-warning: #ffff00;
+  --color-warning-bg: rgba(255, 255, 0, 0.1);
+  --color-warning-border: #ffff00;
+  --color-error: #ff0000;
+  --color-error-bg: rgba(255, 0, 0, 0.1);
+  --color-error-border: #ff0000;
+  --color-info: #6fc3ff;
+  --color-info-bg: rgba(111, 195, 255, 0.1);
+  --color-info-border: #6fc3ff;
+
+  /* Borders - all borders highly visible */
+  --color-border: #6fc3ff;
+  --color-border-subtle: #6fc3ff;
+  --color-border-strong: #ffffff;
+  --color-border-focus: #f38518;
+
+  /* Shadows - minimal in HC */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-overlay: none;
+
+  /* Scrollbar */
+  --scrollbar-track: #000000;
+  --scrollbar-thumb: #6fc3ff;
+  --scrollbar-thumb-hover: #ffffff;
+
+  /* HTTP Methods */
+  --color-method-get: #00ff00;
+  --color-method-get-bg: rgba(0, 255, 0, 0.15);
+  --color-method-post: #6fc3ff;
+  --color-method-post-bg: rgba(111, 195, 255, 0.15);
+  --color-method-patch: #ffff00;
+  --color-method-patch-bg: rgba(255, 255, 0, 0.15);
+  --color-method-delete: #ff0000;
+  --color-method-delete-bg: rgba(255, 0, 0, 0.15);
+  --color-method-put: #ffff00;
+  --color-method-put-bg: rgba(255, 255, 0, 0.15);
+
+  /* Syntax - JSON */
+  --syntax-json-key: #9cdcfe;
+  --syntax-json-string: #ce9178;
+  --syntax-json-number: #b5cea8;
+  --syntax-json-boolean: #6fc3ff;
+  --syntax-json-null: #ff0000;
+  --syntax-json-bracket: #ffffff;
+
+  /* Syntax - XML */
+  --syntax-xml-tag: #6fc3ff;
+  --syntax-xml-attr: #9cdcfe;
+  --syntax-xml-value: #ce9178;
+  --syntax-xml-comment: #7ca668;
+  --syntax-xml-bracket: #ffffff;
+
+  /* Tree / Explorer */
+  --tree-indent-guide: #6fc3ff;
+  --tree-indent-guide-active: #ffffff;
+
+  /* Skeleton / Loading */
+  --skeleton-base: #1a1a1a;
+  --skeleton-shimmer: #333333;
+
+  /* Focus ring - extra visible */
+  --focus-ring: 0 0 0 2px #f38518;
+}
+
+/* ----------------------------------------------------------------
+   System Preference Auto-Detection
+   Only applies when no explicit data-theme is set, OR when
+   data-theme="auto" is used.
+   ---------------------------------------------------------------- */
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] {
+    /* Surfaces */
+    --color-bg-base: #ffffff;
+    --color-bg-sidebar: #f3f3f3;
+    --color-bg-panel: #f8f8f8;
+    --color-bg-input: #ffffff;
+    --color-bg-hover: #e8e8e8;
+    --color-bg-active: #d6ebff;
+    --color-bg-selected: #d6ebff;
+    --color-bg-overlay: rgba(0, 0, 0, 0.3);
+    --color-bg-tooltip: #2d2d2d;
+    --color-bg-dropdown: #ffffff;
+    --color-bg-card: #ffffff;
+    --color-bg-badge: #e0e0e0;
+
+    --color-text-primary: #333333;
+    --color-text-bright: #000000;
+    --color-text-muted: #717171;
+    --color-text-disabled: #a0a0a0;
+    --color-text-inverse: #ffffff;
+    --color-text-link: #0066bf;
+
+    --color-accent-primary: #0078d4;
+    --color-accent-primary-hover: #106ebe;
+    --color-accent-primary-active: #005a9e;
+
+    --color-success: #107c10;
+    --color-success-bg: rgba(16, 124, 16, 0.08);
+    --color-warning: #a67c00;
+    --color-warning-bg: rgba(166, 124, 0, 0.08);
+    --color-error: #d13438;
+    --color-error-bg: rgba(209, 52, 56, 0.08);
+    --color-info: #0078d4;
+    --color-info-bg: rgba(0, 120, 212, 0.08);
+
+    --color-border: #d4d4d4;
+    --color-border-subtle: #e5e5e5;
+    --color-border-strong: #b0b0b0;
+    --color-border-focus: #0078d4;
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+    --scrollbar-thumb: rgba(100, 100, 100, 0.3);
+    --scrollbar-thumb-hover: rgba(100, 100, 100, 0.5);
+
+    --syntax-json-key: #0451a5;
+    --syntax-json-string: #a31515;
+    --syntax-json-number: #098658;
+    --syntax-json-boolean: #0000ff;
+    --syntax-json-null: #d13438;
+    --syntax-json-bracket: #333333;
+
+    --syntax-xml-tag: #800000;
+    --syntax-xml-attr: #ff0000;
+    --syntax-xml-value: #0451a5;
+    --syntax-xml-comment: #008000;
+
+    --tree-indent-guide: #d4d4d4;
+    --skeleton-base: #e8e8e8;
+    --skeleton-shimmer: #f5f5f5;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    /* Inherits from :root which is dark by default, no overrides needed */
+  }
+}
+
+/* ----------------------------------------------------------------
+   Forced-colors / High Contrast OS-level
+   ---------------------------------------------------------------- */
+@media (forced-colors: active) {
+  :root,
+  [data-theme] {
+    --color-bg-base: Canvas;
+    --color-bg-sidebar: Canvas;
+    --color-bg-panel: Canvas;
+    --color-text-primary: CanvasText;
+    --color-text-bright: CanvasText;
+    --color-accent-primary: LinkText;
+    --color-border: CanvasText;
+    --color-border-focus: Highlight;
+  }
+}

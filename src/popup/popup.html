@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dataverse Toolkit</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="popup" class="dvt-popup">
+    <!-- Header -->
+    <div class="dvt-popup-header">
+      <div class="dvt-popup-logo">DV</div>
+      <div class="dvt-popup-title">Dataverse Toolkit</div>
+    </div>
+
+    <!-- Connection status -->
+    <div id="connection-status" class="dvt-popup-status">
+      <span id="status-indicator" class="dvt-popup-status-dot disconnected"></span>
+      <span id="status-text" class="dvt-popup-status-text">Checking connection...</span>
+    </div>
+
+    <!-- Environment info (shown when connected) -->
+    <div id="env-info" class="dvt-popup-env" style="display: none;">
+      <div class="dvt-popup-env-name" id="env-name"></div>
+      <div class="dvt-popup-env-url" id="env-url"></div>
+    </div>
+
+    <!-- Not connected message -->
+    <div id="not-connected" class="dvt-popup-disconnected" style="display: none;">
+      <p>Navigate to a Dynamics 365 or Power Platform environment to connect.</p>
+    </div>
+
+    <!-- Primary action -->
+    <button id="btn-open-panel" class="dvt-popup-btn primary">Open Side Panel</button>
+
+    <!-- Quick actions -->
+    <div class="dvt-popup-actions">
+      <button id="btn-whoami" class="dvt-popup-btn secondary" title="WhoAmI - Show current user info">
+        WhoAmI
+      </button>
+      <button id="btn-clear-cache" class="dvt-popup-btn secondary" title="Clear metadata cache">
+        Clear Cache
+      </button>
+      <button id="btn-theme" class="dvt-popup-btn secondary" title="Toggle theme">
+        Toggle Theme
+      </button>
+    </div>
+
+    <!-- WhoAmI result (hidden by default) -->
+    <div id="whoami-result" class="dvt-popup-result" style="display: none;"></div>
+
+    <!-- Footer -->
+    <div class="dvt-popup-footer">
+      <span class="dvt-popup-version" id="version-label">v1.0.0</span>
+    </div>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4"/>
+      <stop offset="100%" style="stop-color:#00bcf2"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:rgba(255,255,255,0.3)"/>
+      <stop offset="100%" style="stop-color:rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="url(#bg)"/>
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="url(#shine)"/>
+  <!-- Database/Dataverse icon - stacked cylinders -->
+  <ellipse cx="64" cy="38" rx="32" ry="12" fill="none" stroke="white" stroke-width="4"/>
+  <path d="M32 38 v16 c0 6.6 14.3 12 32 12 s32-5.4 32-12 V38" fill="none" stroke="white" stroke-width="4"/>
+  <path d="M32 54 v16 c0 6.6 14.3 12 32 12 s32-5.4 32-12 V54" fill="none" stroke="white" stroke-width="4"/>
+  <path d="M32 70 v16 c0 6.6 14.3 12 32 12 s32-5.4 32-12 V70" fill="none" stroke="white" stroke-width="4"/>
+  <!-- API bracket accents -->
+  <path d="M18 56 l-6 8 6 8" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M110 56 l6 8 -6 8" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

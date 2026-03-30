@@ -1,0 +1,236 @@
+/**
+ * Dataverse Toolkit - Popup Styles
+ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+
+.dvt-popup {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+}
+
+/* Header */
+.dvt-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dvt-popup-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.dvt-popup-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Status */
+.dvt-popup-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #252526;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.dvt-popup-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dvt-popup-status-dot.connected {
+  background: #4ec9b0;
+  box-shadow: 0 0 6px rgba(78, 201, 176, 0.4);
+}
+
+.dvt-popup-status-dot.disconnected {
+  background: #f48771;
+  box-shadow: 0 0 6px rgba(244, 135, 113, 0.3);
+}
+
+.dvt-popup-status-text {
+  font-size: 12px;
+  color: #969696;
+}
+
+/* Environment info */
+.dvt-popup-env {
+  padding: 8px 12px;
+  background: #252526;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.dvt-popup-env-name {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.dvt-popup-env-url {
+  font-size: 11px;
+  color: #888;
+  word-break: break-all;
+}
+
+/* Disconnected message */
+.dvt-popup-disconnected {
+  padding: 12px;
+  text-align: center;
+  color: #888;
+  font-size: 12px;
+  background: #252526;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.dvt-popup-disconnected p {
+  line-height: 1.5;
+}
+
+/* Buttons */
+.dvt-popup-btn {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  text-align: center;
+}
+
+.dvt-popup-btn:hover {
+  opacity: 0.9;
+}
+
+.dvt-popup-btn:active {
+  opacity: 0.8;
+}
+
+.dvt-popup-btn.primary {
+  background: #0078d4;
+  color: #fff;
+  font-weight: 600;
+  width: 100%;
+}
+
+.dvt-popup-btn.primary:hover {
+  background: #106ebe;
+}
+
+.dvt-popup-btn.secondary {
+  background: #2d2d2d;
+  color: #ccc;
+  border: 1px solid #444;
+  flex: 1;
+  font-size: 11px;
+  padding: 7px 8px;
+}
+
+.dvt-popup-btn.secondary:hover {
+  background: #3c3c3c;
+}
+
+/* Quick actions row */
+.dvt-popup-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* WhoAmI result */
+.dvt-popup-result {
+  padding: 10px 12px;
+  background: #252526;
+  border-radius: 6px;
+  border: 1px solid #333;
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.dvt-popup-result .label {
+  color: #9cdcfe;
+  font-weight: 600;
+}
+
+.dvt-popup-result .value {
+  color: #ce9178;
+}
+
+/* Footer */
+.dvt-popup-footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+  border-top: 1px solid #333;
+}
+
+.dvt-popup-version {
+  font-size: 10px;
+  color: #555;
+}
+
+/* Light theme overrides */
+[data-theme="light"] body,
+body.theme-light {
+  background: #ffffff;
+  color: #1e1e1e;
+}
+
+[data-theme="light"] .dvt-popup-status,
+[data-theme="light"] .dvt-popup-env,
+[data-theme="light"] .dvt-popup-disconnected,
+[data-theme="light"] .dvt-popup-result,
+body.theme-light .dvt-popup-status,
+body.theme-light .dvt-popup-env,
+body.theme-light .dvt-popup-disconnected,
+body.theme-light .dvt-popup-result {
+  background: #f3f3f3;
+  border-color: #e0e0e0;
+}
+
+[data-theme="light"] .dvt-popup-btn.secondary,
+body.theme-light .dvt-popup-btn.secondary {
+  background: #f5f5f5;
+  border-color: #e0e0e0;
+  color: #333;
+}
+
+[data-theme="light"] .dvt-popup-footer,
+body.theme-light .dvt-popup-footer {
+  border-color: #e0e0e0;
+}
