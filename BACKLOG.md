@@ -29,12 +29,12 @@
 - [ ] "Add sort" drag handle UX
 
 ### Security Tab
-- [ ] User Permissions tab: test with real user → verify `RetrieveUserPrivileges` result shape
-- [ ] Field Security tab: verify `fieldsecurityprofile` + `fieldpermission` queries work
+- [x] User Permissions: `_computeEffectivePermissions` now uses `RetrieveUserPrivileges(UserId=@p)?@p={guid}` → parses `prvCreateAccount` names → groups by entity with max depth per privilege
+- [x] Field Security: switched to direct nav prop `systemusers(id)/systemuserprofiles_association` (avoids unreliable N:N expand-with-filter)
 
 ### ERD Viewer
-- [ ] Export Schema: refine to JSON Schema draft-07 format (currently outputs custom shape)
-- [ ] Export Payload: currently only exports required fields — consider option for all writable fields
+- [x] Export Schema: outputs proper JSON Schema draft-07 (`$schema`, `definitions`, `x-dataverse-type`, `format: uuid/date-time`)
+- [x] Export Payload: now includes all required + non-custom recommended fields (not just required)
 
 ### Explorer
 - [x] Actions / Functions nodes: load `customapis` + parameters via `customapirequestparameters` / `customapiresponseproperties`; detail panel shows type + binding

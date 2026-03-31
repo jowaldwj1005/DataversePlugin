@@ -979,19 +979,14 @@ export class SecurityInspector {
         this.api.get(`systemusers(${userId})/teammembership_association`, {
           $select: 'teamid,name,teamtype',
         }).catch(() => ({ value: [] })),
-        this.api.get('fieldsecurityprofiles', {
+        this.api.get(`systemusers(${userId})/systemuserprofiles_association`, {
           $select: 'fieldsecurityprofileid,name',
-          $expand: `systemuserprofiles_association($filter=systemuserid eq ${userId})`,
         }).catch(() => ({ value: [] })),
       ]);
 
       this._userRoles = rolesResult?.value || [];
       this._userTeams = teamsResult?.value || [];
-
-      // Filter field security profiles that include this user
-      this._userFieldSecurityProfiles = (fspResult?.value || []).filter(
-        (p) => p.systemuserprofiles_association && p.systemuserprofiles_association.length > 0
-      );
+      this._userFieldSecurityProfiles = fspResult?.value || [];
 
       // Build effective permissions by combining all roles
       this._userEffectivePermissions = await this._computeEffectivePermissions(userId);
@@ -1006,22 +1001,60 @@ export class SecurityInspector {
   }
 
   async _computeEffectivePermissions(userId) {
-    // This is a simplified view - in production, you'd need to combine
-    // direct role privileges + team role privileges
+    // RetrieveUserPrivileges returns all privileges the user has (via direct
+    // roles + team roles), with the maximum Depth across all assignments.
+    // Same pattern as RetrieveRolePrivilegesRole used in the entity matrix.
     try {
-      const result = await this.api.executeFunction(
-        'RetrievePrincipalAccess',
-        { Target: userId },
-      ).catch(() => null);
+      const result = await this.api.request(
+        'GET',
+        `RetrieveUserPrivileges(UserId=@p)?@p=${userId}`
+      );
 
-      if (result?.AccessRights) {
-        return [{ entityName: 'All (Principal Access)', ...result.AccessRights }];
+      const rawPrivs = result.RolePrivileges || [];
+
+      // Map Depth string → ACCESS_LEVELS key
+      const DEPTH_TO_LEVEL = { Basic: 1, Local: 2, Deep: 4, Global: 8 };
+
+      // Privilege name parsing: "prvCreateAccount" → op="Create", entity="account"
+      // Try operations in longest-first order to avoid "Append" swallowing "AppendTo"
+      const OPS_BY_LENGTH = ['AppendTo', 'Assign', 'Create', 'Delete', 'Append', 'Write', 'Share', 'Read'];
+
+      // Group by entity → { entityName, Create: level, Read: level, ... }
+      const byEntity = new Map();
+
+      for (const p of rawPrivs) {
+        const name = p.PrivilegeName || '';
+        const depth = DEPTH_TO_LEVEL[p.Depth] || 0;
+
+        if (!name.startsWith('prv')) continue;
+        const withoutPrv = name.slice(3); // e.g. "CreateAccount"
+
+        let op = null;
+        let entityPart = '';
+        for (const candidate of OPS_BY_LENGTH) {
+          if (withoutPrv.startsWith(candidate)) {
+            op = candidate;
+            entityPart = withoutPrv.slice(candidate.length).toLowerCase(); // "account"
+            break;
+          }
+        }
+        if (!op || !entityPart) continue;
+        // Normalise op to match PRIVILEGE_TYPES keys (AppendTo → AppendTo ✓)
+        const privKey = op === 'AppendTo' ? 'AppendTo' : op;
+
+        if (!byEntity.has(entityPart)) {
+          byEntity.set(entityPart, { entityName: entityPart });
+        }
+        const row = byEntity.get(entityPart);
+        // Keep the maximum depth across privileges with the same op on the same entity
+        row[privKey] = Math.max(row[privKey] || 0, depth);
       }
-    } catch {
-      // Function may not be available - fall back to empty
-    }
 
-    return [];
+      return [...byEntity.values()].sort((a, b) => a.entityName.localeCompare(b.entityName));
+    } catch {
+      // API function may not be available — return empty, no crash
+      return [];
+    }
   }
 
   async _loadFieldSecurity(entityLogicalName) {
