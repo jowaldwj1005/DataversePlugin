@@ -25,8 +25,8 @@
 ## Planned – Next Priority
 
 ### FetchXML Builder
-- [ ] OData output: verify/fix `$expand` for N:N relationships (navigationProp may be missing)
-- [ ] "Add sort" drag handle UX
+- [x] OData `$expand`: N:N relationships are explicitly skipped (Dataverse OData v4 does not support N:N expand); inline note generated explaining user must use FetchXML output for N:N queries
+- [x] Sort drag handle: HTML5 drag-and-drop reordering on sort rows (≡ handle, dragstart/drop to swap positions, visual feedback)
 
 ### Security Tab
 - [x] User Permissions: `_computeEffectivePermissions` now uses `RetrieveUserPrivileges(UserId=@p)?@p={guid}` → parses `prvCreateAccount` names → groups by entity with max depth per privilege
@@ -41,7 +41,7 @@
 - [x] Solutions node: expandable → loads entities via `solutioncomponents?componenttype eq 1` matched against entity list
 
 ### General
-- [ ] Icons (16x16, 48x48, 128x128) — extension shows default icon
+- [x] Icons (16x16, 48x48, 128x128) — icon files exist + wired in manifest (verified)
 
 ## Known API Constraints
 - `$orderby` not supported on metadata endpoints → sort client-side

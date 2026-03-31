@@ -2361,7 +2361,19 @@ details:not([open]) > .qb-section-title::before { content: '\25B8 '; }
 
 /* Sorts */
 .qb-sort-list { padding: 4px 10px 6px; }
-.qb-sort-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
+.qb-sort-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; cursor: default; }
+.qb-sort-row[draggable="true"] { cursor: grab; }
+.qb-sort-row.qb-dragging { opacity: 0.4; }
+.qb-sort-row.qb-drag-over { outline: 2px dashed var(--color-accent-primary); outline-offset: 1px; }
+.qb-drag-handle {
+  cursor: grab;
+  color: var(--color-text-disabled);
+  font-size: 1rem;
+  padding: 0 3px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.qb-drag-handle:hover { color: var(--color-text-muted); }
 .qb-sort-dir { min-width: 40px; text-align: center; }
 
 /* Options bar */

@@ -681,9 +681,20 @@ function modelToOData(model, entitySetName) {
   if (model.top) parts.push(`$top=${model.top}`);
 
   const expands = [];
+  const n2nSkipped = [];
+
   for (const le of (model.linkEntities || [])) {
+    // N:N joins cannot be represented as OData $expand — Dataverse Web API
+    // does not expose N:N navigation properties for $expand in this way.
+    // Use FetchXML output for queries involving N:N relationships.
+    if (le._relMeta?.joinType === 'ManyToMany') {
+      n2nSkipped.push(le.name);
+      continue;
+    }
+
     const navProp = le._relMeta?.navigationProp;
     if (!navProp) continue;
+
     if (!le.allAttributes && le.attributes.length > 0) {
       const cols = le.attributes.map(a => a.name).filter(Boolean).join(',');
       expands.push(cols ? `${navProp}($select=${cols})` : navProp);
@@ -693,7 +704,12 @@ function modelToOData(model, entitySetName) {
   }
   if (expands.length) parts.push(`$expand=${expands.join(',')}`);
 
-  return `${entitySetName}${parts.length ? '?' + parts.join('&') : ''}`;
+  let url = `${entitySetName}${parts.length ? '?' + parts.join('&') : ''}`;
+  if (n2nSkipped.length) {
+    url += `\n// Note: N:N join(s) for [${n2nSkipped.join(', ')}] cannot be represented` +
+      ' as OData $expand — use FetchXML output mode for these queries.';
+  }
+  return url;
 }
 
 function _buildODataFilter(group) {
@@ -1470,6 +1486,9 @@ export class FetchXmlBuilder {
     const list = document.createElement('div');
     list.className = 'qb-sort-list';
 
+    // Drag state
+    let dragSrcIdx = null;
+
     const refresh = () => {
       list.innerHTML = '';
       summary.textContent = `Sort (${entityModel.orders.length})`;
@@ -1478,6 +1497,41 @@ export class FetchXmlBuilder {
         const ord = entityModel.orders[i];
         const row = document.createElement('div');
         row.className = 'qb-sort-row';
+        row.draggable = true;
+        row.dataset.idx = i;
+
+        // Drag handle
+        const handle = document.createElement('span');
+        handle.className = 'qb-drag-handle';
+        handle.textContent = '\u2261'; // ≡
+        handle.title = 'Drag to reorder';
+
+        row.addEventListener('dragstart', (e) => {
+          dragSrcIdx = i;
+          row.classList.add('qb-dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        row.addEventListener('dragend', () => {
+          row.classList.remove('qb-dragging');
+          list.querySelectorAll('.qb-drag-over').forEach(el => el.classList.remove('qb-drag-over'));
+        });
+        row.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          row.classList.add('qb-drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('qb-drag-over'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          row.classList.remove('qb-drag-over');
+          const targetIdx = parseInt(row.dataset.idx, 10);
+          if (dragSrcIdx === null || dragSrcIdx === targetIdx) return;
+          const [moved] = entityModel.orders.splice(dragSrcIdx, 1);
+          entityModel.orders.splice(targetIdx, 0, moved);
+          dragSrcIdx = null;
+          refresh();
+          this._debouncedSync();
+        });
 
         const sel = document.createElement('select');
         sel.className = 'qb-select qb-attr-select';
@@ -1508,7 +1562,7 @@ export class FetchXmlBuilder {
           this._debouncedSync();
         });
 
-        row.append(sel, dirBtn, removeBtn);
+        row.append(handle, sel, dirBtn, removeBtn);
         list.appendChild(row);
       }
 
