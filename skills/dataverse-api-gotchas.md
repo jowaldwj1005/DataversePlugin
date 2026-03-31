@@ -1,48 +1,55 @@
-# Skill: Dataverse Web API Gotchas
+# Skill: Dataverse Web API — Common Traps
 
-Key facts that have caused bugs in this codebase. Read before touching any API query.
+Use this when building any client that queries the Dataverse Web API.
+These are non-obvious behaviours that are not clearly documented and cause real bugs.
 
-## 1. `api-client.request()` returns unwrapped data
+---
 
-`DataverseClient.request()` already throws on failure and returns `response.data` directly.
-Modules must NOT check `response.success` or `response.ok`, and must NOT do `response.data || response`.
+## 1. `$orderby` is rejected on all metadata endpoints
+
+`EntityDefinitions`, `/Attributes`, `/Relationships`, `/Keys` — all reject `$orderby` with a 400 error.
+Sort client-side:
 
 ```js
-// WRONG
-const response = await this.api.request('GET', 'accounts');
-if (!response.success && !response.ok) throw new Error(response.error);
-const data = response.data || response;
-
-// CORRECT
-const data = await this.api.request('GET', 'accounts');
-const records = data.value || [];
+const attrs = data.value || [];
+attrs.sort((a, b) => a.LogicalName.localeCompare(b.LogicalName));
 ```
 
-## 2. `$select` on `/Attributes` — base type only
+---
+
+## 2. `$select` on `/Attributes` — base type properties only
 
 `EntityDefinitions(LogicalName='x')/Attributes` returns the base `AttributeMetadata` OData type.
-You can only `$select` properties defined on that base type:
-- `LogicalName`, `DisplayName`, `AttributeType`, `SchemaName`, `RequiredLevel`, `IsPrimaryId`, `IsPrimaryName`, `Description`, `IsCustomAttribute`
+Allowed `$select` fields: `LogicalName`, `DisplayName`, `AttributeType`, `SchemaName`,
+`RequiredLevel`, `IsPrimaryId`, `IsPrimaryName`, `Description`, `IsCustomAttribute`.
 
-Type-specific properties (`MaxLength`, `MinValue`, `MaxValue`, `Precision`, `Format`, `OptionSet`) require a type-cast URL:
+Type-specific properties (`MaxLength`, `MinValue`, `MaxValue`, `Precision`, `Format`, `OptionSet`)
+require a type-cast URL:
+
 ```
-/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata?$select=LogicalName,MaxLength
+GET /EntityDefinitions(LogicalName='account')/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata
+    ?$select=LogicalName,MaxLength
 ```
-Or fetch the full attribute separately:
+
+Or fetch one attribute individually:
+
 ```
-/Attributes(LogicalName='name')/Microsoft.Dynamics.CRM.StringAttributeMetadata
+GET /EntityDefinitions(LogicalName='account')/Attributes(LogicalName='name')
+    /Microsoft.Dynamics.CRM.StringAttributeMetadata
 ```
+
+---
 
 ## 3. Role privilege depth — use `RetrieveRolePrivilegesRole`
 
-Both `roleprivileges_association` and `roleprivilegesdepthmask` fail to return usable depth data.
-Use the purpose-built Dataverse function instead:
+`roleprivileges_association` and `roleprivilegesdepthmask` both return incomplete or unusable depth data.
+The purpose-built OData function is the only reliable source:
 
 ```
-GET /RetrieveRolePrivilegesRole(RoleId=@p)?@p={roleId}
+GET /RetrieveRolePrivilegesRole(RoleId=@p)?@p=<roleGuid>
 ```
 
-Returns:
+Response shape:
 ```json
 {
   "RolePrivileges": [
@@ -51,35 +58,98 @@ Returns:
 }
 ```
 
-`Depth` is a string: `"Basic"` (User) | `"Local"` (BU) | `"Deep"` (Parent:Child BU) | `"Global"` (Org).
-Map to ACCESS_LEVELS: `{ Basic: 1, Local: 2, Deep: 4, Global: 8 }`.
-
-## 4. `$orderby` not supported on metadata endpoints
-
-Endpoints under `EntityDefinitions`, `/Attributes`, `/Relationships` etc. reject `$orderby`.
-Sort client-side with `.sort((a, b) => a.LogicalName.localeCompare(b.LogicalName))`.
-
-## 5. Service worker can be killed by Chrome
-
-MV3 service workers are killed after ~30 seconds of inactivity. `activeEnv` (in-memory) is lost.
-Always restore from `chrome.storage.session` at the start of `proxyApiRequest`:
+`Depth` is a string — never a number. Map to access level integers:
 ```js
-if (!activeEnv) {
-  const stored = await chrome.storage.session.get('activeEnv');
-  if (stored.activeEnv) activeEnv = stored.activeEnv;
-}
+const DEPTH = { Basic: 1, Local: 2, Deep: 4, Global: 8 };
 ```
 
-## 6. Content scripts orphaned after extension reload (dev mode)
+---
 
-After reloading the extension unpacked, existing tabs' content scripts lose their extension connection.
-Recovery: use `chrome.scripting.executeScript()` to re-inject on-demand when `sendMessage` fails.
-Requires `"scripting"` permission in manifest.
+## 4. User privilege depth — use `RetrieveUserPrivileges`
 
-## 7. FetchXML via OData URL
+For all privileges a specific user holds (across direct roles + team roles):
 
-FetchXML queries go through GET with `?fetchXml={encodeURIComponent(xml)}`:
 ```
-GET /accounts?fetchXml=%3Cfetch%20...%3E
+GET /RetrieveUserPrivileges(UserId=@p)?@p=<userGuid>
 ```
-The entity set name in the URL must match `<entity name="account">` → `EntitySetName` from metadata.
+
+Same `RolePrivileges[].PrivilegeName` / `.Depth` shape as above.
+Parse `PrivilegeName` to extract operation and entity:
+- `"prvCreateAccount"` → op: `Create`, entity: `account`
+- `"prvAppendToAccount"` → op: `AppendTo`, entity: `account`
+- Match operations longest-first to avoid `Append` swallowing `AppendTo`
+
+---
+
+## 5. FetchXML via OData — entity set name required in URL
+
+FetchXML queries are sent as a query string parameter, not as a POST body:
+
+```
+GET /api/data/v9.2/accounts?fetchXml=%3Cfetch%20...%3E
+```
+
+The URL segment (`accounts`) must be the **EntitySetName** — not the LogicalName.
+`account` (LogicalName) → `accounts` (EntitySetName) — but custom entities are unpredictable.
+Always fetch `EntitySetName` from metadata: `EntityDefinitions(LogicalName='x')?$select=EntitySetName`.
+
+---
+
+## 6. N:N relationships cannot be `$expand`ed
+
+OData v4 `$expand` works for 1:N and N:1 navigation properties, but **not for N:N** intersect entities.
+There is no standard navigation property for N:N that supports `$expand`.
+Use FetchXML `<link-entity>` for N:N joins — it's the only supported path.
+
+---
+
+## 7. `$batch` response is `multipart/mixed` — parse boundary manually
+
+The response to `POST $batch` has `Content-Type: multipart/mixed; boundary="..."`.
+Parse the boundary from the header, then split the body on `--{boundary}`.
+Each part contains its own status line, headers, and JSON body.
+
+```js
+const boundary = contentType.match(/boundary="?([^";]+)"?/)[1];
+const parts = body.split(`--${boundary}`).slice(1, -1);
+```
+
+JSON.parse does not work on the raw response.
+
+---
+
+## 8. N:N expand via navigation property — field security profiles
+
+For N:N associations where you need members of a set, use the **nav property on one side**
+rather than `$expand` with a nested `$filter` (which is unreliable in Dataverse):
+
+```
+GET /systemusers(<userId>)/systemuserprofiles_association?$select=fieldsecurityprofileid,name
+```
+
+This is more reliable than:
+```
+GET /fieldsecurityprofiles?$expand=systemuserprofiles_association($filter=systemuserid eq <id>)
+```
+
+---
+
+## 9. Custom Actions/Functions are in `customapis`, not `sdkmessage`
+
+Unmanaged custom actions and functions registered with the Custom API framework:
+
+```
+GET /customapis?$select=uniquename,displayname,isfunction,isboundapi,boundentitylogicalname
+```
+
+Request parameters:
+```
+GET /customapirequestparameters?$filter=customapiid/uniquename eq '<name>'&$select=uniquename,name,type,isoptional
+```
+
+Response properties:
+```
+GET /customapiresponseproperties?$filter=customapiid/uniquename eq '<name>'&$select=uniquename,name,type
+```
+
+Bound APIs (on an entity): `isboundapi eq true` and `boundentitylogicalname` is set.
