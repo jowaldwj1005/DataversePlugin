@@ -37,8 +37,8 @@
 - [ ] Export Payload: currently only exports required fields — consider option for all writable fields
 
 ### Explorer
-- [ ] Actions / Functions nodes: load parameters and show in detail panel
-- [ ] Solutions node: load entities in solution via `solutioncomponents`
+- [x] Actions / Functions nodes: load `customapis` + parameters via `customapirequestparameters` / `customapiresponseproperties`; detail panel shows type + binding
+- [x] Solutions node: expandable → loads entities via `solutioncomponents?componenttype eq 1` matched against entity list
 
 ### General
 - [ ] Icons (16x16, 48x48, 128x128) — extension shows default icon

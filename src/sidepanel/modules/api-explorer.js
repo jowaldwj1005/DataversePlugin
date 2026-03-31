@@ -94,6 +94,25 @@ const API = {
 
   solutions: () =>
     `solutions?$select=friendlyname,uniquename,version,ismanaged,description`,
+
+  globalCustomApis: (isFunction) =>
+    `customapis?$select=uniquename,displayname,description,isfunction,isboundapi,boundentitylogicalname` +
+    `&$filter=isfunction eq ${isFunction} and isboundapi eq false`,
+
+  boundCustomApis: (entityLogicalName) =>
+    `customapis?$select=uniquename,displayname,description,isfunction,isboundapi,boundentitylogicalname` +
+    `&$filter=isboundapi eq true and boundentitylogicalname eq '${entityLogicalName}'`,
+
+  customApiParams: (uniquename) =>
+    `customapirequestparameters?$select=uniquename,name,description,type,isoptional` +
+    `&$filter=customapiid/uniquename eq '${uniquename}'`,
+
+  customApiResponse: (uniquename) =>
+    `customapiresponseproperties?$select=uniquename,name,description,type` +
+    `&$filter=customapiid/uniquename eq '${uniquename}'`,
+
+  solutionComponents: (solutionUniqueName) =>
+    `solutioncomponents?$filter=solutionid/uniquename eq '${solutionUniqueName}' and componenttype eq 1&$select=objectid`,
 };
 
 // ---------------------------------------------------------------------------
@@ -514,8 +533,6 @@ class ApiExplorer {
           break;
         case 'entity-forms':
         case 'entity-views':
-        case 'entity-actions':
-          // Placeholder - mark as loaded with a note
           node.children = [createNode({
             id: `${node.id}-placeholder`,
             label: 'Coming soon\u2026',
@@ -524,6 +541,9 @@ class ApiExplorer {
             parent: node,
           })];
           this._nodeMap.set(node.children[0].id, node.children[0]);
+          break;
+        case 'entity-actions':
+          await this._loadCustomApis(node, node.data?.entityLogicalName);
           break;
         case 'global-optionsets-category':
           await this._loadGlobalOptionSets(node);
@@ -532,15 +552,22 @@ class ApiExplorer {
           await this._loadSolutions(node);
           break;
         case 'global-actions-category':
+          await this._loadGlobalCustomApis(node, false);
+          break;
         case 'global-functions-category':
-          node.children = [createNode({
-            id: `${node.id}-placeholder`,
-            label: 'Coming soon\u2026',
-            depth: node.depth + 1,
-            type: 'placeholder',
-            parent: node,
-          })];
-          this._nodeMap.set(node.children[0].id, node.children[0]);
+          await this._loadGlobalCustomApis(node, true);
+          break;
+        case 'solution':
+          await this._loadSolutionEntities(node);
+          break;
+        case 'customapi':
+          this._buildCustomApiSubtree(node);
+          break;
+        case 'customapi-params':
+          await this._loadCustomApiParams(node, false);
+          break;
+        case 'customapi-response':
+          await this._loadCustomApiParams(node, true);
           break;
         default:
           break;
@@ -832,9 +859,220 @@ class ApiExplorer {
       const child = createNode({
         id: `solution-${sol.uniquename}`,
         label: `${label}${version}${managed}`,
+        expandable: true,
         depth: node.depth + 1,
         type: 'solution',
         data: sol,
+        parent: node,
+      });
+      if (this._expandedState.has(child.id)) child.expanded = true;
+      this._nodeMap.set(child.id, child);
+      return child;
+    });
+  }
+
+  /** Load entities that belong to a solution. */
+  async _loadSolutionEntities(node) {
+    const uniqueName = node.data?.uniquename;
+    if (!uniqueName) return;
+
+    const compData = await this._apiGet(API.solutionComponents(uniqueName));
+    const objectIds = new Set((compData.value || []).map(c => c.objectid).filter(Boolean));
+
+    if (!objectIds.size) {
+      const empty = createNode({
+        id: `${node.id}-empty`,
+        label: '(no entities in this solution)',
+        depth: node.depth + 1,
+        type: 'placeholder',
+        parent: node,
+      });
+      node.children = [empty];
+      this._nodeMap.set(empty.id, empty);
+      return;
+    }
+
+    // Match objectIds against the entity list (cached in node map from tables category)
+    const tablesNode = this._nodeMap.get('tables');
+    let allEntities = (tablesNode?.children || [])
+      .filter(c => c.type === 'entity')
+      .map(c => c.data)
+      .filter(Boolean);
+
+    // If tables haven't been loaded yet, fetch minimal entity list
+    if (!allEntities.length) {
+      const entData = await this._apiGet(
+        'EntityDefinitions?$select=LogicalName,DisplayName,EntitySetName,MetadataId,IsCustomEntity&$filter=IsPrivate eq false'
+      );
+      allEntities = entData.value || [];
+    }
+
+    const entities = allEntities
+      .filter(e => objectIds.has(e.MetadataId))
+      .sort((a, b) => a.LogicalName.localeCompare(b.LogicalName));
+
+    node.badge = String(entities.length);
+
+    node.children = entities.map((entity) => {
+      const dName = displayName(entity);
+      const label = dName && dName !== entity.LogicalName
+        ? `${dName} (${entity.LogicalName})`
+        : entity.LogicalName;
+      const child = createNode({
+        id: `${node.id}-entity-${entity.LogicalName}`,
+        label,
+        sublabel: entity.EntitySetName,
+        expandable: true,
+        depth: node.depth + 1,
+        type: 'entity',
+        data: entity,
+        parent: node,
+      });
+      if (entity.IsCustomEntity) child.badgeClass = 'custom';
+      if (this._expandedState.has(child.id)) child.expanded = true;
+      this._nodeMap.set(child.id, child);
+      return child;
+    });
+  }
+
+  /** Load global custom actions or functions. */
+  async _loadGlobalCustomApis(node, isFunction) {
+    const data = await this._apiGet(API.globalCustomApis(isFunction));
+    const apis = data.value || [];
+    apis.sort((a, b) => (a.uniquename || '').localeCompare(b.uniquename || ''));
+
+    node.badge = String(apis.length);
+
+    if (!apis.length) {
+      const empty = createNode({
+        id: `${node.id}-empty`,
+        label: `(no custom ${isFunction ? 'functions' : 'actions'} registered)`,
+        depth: node.depth + 1,
+        type: 'placeholder',
+        parent: node,
+      });
+      node.children = [empty];
+      this._nodeMap.set(empty.id, empty);
+      return;
+    }
+
+    node.children = this._buildCustomApiNodes(apis, node);
+  }
+
+  /** Load entity-bound custom actions and functions. */
+  async _loadCustomApis(node, entityLogicalName) {
+    if (!entityLogicalName) return;
+    const data = await this._apiGet(API.boundCustomApis(entityLogicalName));
+    const apis = data.value || [];
+    apis.sort((a, b) => (a.uniquename || '').localeCompare(b.uniquename || ''));
+
+    node.badge = String(apis.length);
+
+    if (!apis.length) {
+      const empty = createNode({
+        id: `${node.id}-empty`,
+        label: '(no bound actions/functions)',
+        depth: node.depth + 1,
+        type: 'placeholder',
+        parent: node,
+      });
+      node.children = [empty];
+      this._nodeMap.set(empty.id, empty);
+      return;
+    }
+
+    node.children = this._buildCustomApiNodes(apis, node);
+  }
+
+  /** Build tree nodes for a list of Custom API objects. */
+  _buildCustomApiNodes(apis, parentNode) {
+    return apis.map((api) => {
+      const dName = api.displayname || api.uniquename;
+      const isFunction = api.isfunction;
+      const isBound = api.isboundapi;
+      const boundLabel = isBound ? ` (bound: ${api.boundentitylogicalname || '?'})` : '';
+
+      const child = createNode({
+        id: `customapi-${api.uniquename}`,
+        label: `${dName || api.uniquename}${boundLabel}`,
+        sublabel: api.uniquename,
+        expandable: true,
+        depth: parentNode.depth + 1,
+        type: 'customapi',
+        data: api,
+        parent: parentNode,
+      });
+      child.badge = isFunction ? 'fn' : 'action';
+      child.badgeClass = isFunction ? '' : 'custom';
+      if (this._expandedState.has(child.id)) child.expanded = true;
+      this._nodeMap.set(child.id, child);
+      return child;
+    });
+  }
+
+  /** Build parameter/response sub-categories for a Custom API node. */
+  _buildCustomApiSubtree(node) {
+    const uniquename = node.data?.uniquename;
+    const depth = node.depth + 1;
+
+    const cats = [
+      { id: `${node.id}-params`, label: 'Request Parameters', icon: ICONS.columns, type: 'customapi-params' },
+      { id: `${node.id}-resp`, label: 'Response Properties', icon: ICONS.columns, type: 'customapi-response' },
+    ];
+
+    node.children = cats.map((cat) => {
+      const child = createNode({
+        id: cat.id,
+        label: cat.label,
+        icon: cat.icon,
+        expandable: true,
+        depth,
+        type: cat.type,
+        data: { uniquename },
+        parent: node,
+      });
+      if (this._expandedState.has(child.id)) child.expanded = true;
+      this._nodeMap.set(child.id, child);
+      return child;
+    });
+
+    node.loaded = true;
+  }
+
+  /** Load request parameters or response properties for a Custom API. */
+  async _loadCustomApiParams(node, isResponse) {
+    const uniquename = node.data?.uniquename;
+    if (!uniquename) return;
+
+    const url = isResponse ? API.customApiResponse(uniquename) : API.customApiParams(uniquename);
+    const data = await this._apiGet(url);
+    const params = data.value || [];
+
+    node.badge = String(params.length);
+
+    if (!params.length) {
+      const empty = createNode({
+        id: `${node.id}-empty`,
+        label: `(none)`,
+        depth: node.depth + 1,
+        type: 'placeholder',
+        parent: node,
+      });
+      node.children = [empty];
+      this._nodeMap.set(empty.id, empty);
+      return;
+    }
+
+    node.children = params.map((p) => {
+      const typeLabel = p.type != null ? ` : ${p.type}` : '';
+      const optional = p.isoptional ? ' (optional)' : '';
+      const child = createNode({
+        id: `${node.id}-${p.uniquename || p.name}`,
+        label: `${p.name || p.uniquename}${typeLabel}${optional}`,
+        sublabel: p.description || '',
+        depth: node.depth + 1,
+        type: 'customapi-param',
+        data: p,
         parent: node,
       });
       this._nodeMap.set(child.id, child);
@@ -1100,10 +1338,34 @@ class ApiExplorer {
       case 'solution':
         this._showSolutionDetails(node.data);
         break;
+      case 'customapi':
+        this._showCustomApiDetails(node.data);
+        break;
       default:
         this._detailPanel.clear();
         break;
     }
+  }
+
+  /** Build detail panel for a Custom API node. */
+  _showCustomApiDetails(api) {
+    if (!api) return;
+    const typeLabel = api.isfunction ? 'Function' : 'Action';
+    const bindLabel = api.isboundapi ? `Bound (${api.boundentitylogicalname || '?'})` : 'Unbound';
+    this._detailPanel.setData({
+      title: api.displayname || api.uniquename,
+      raw: api,
+      sections: [{
+        title: `Custom API \u2014 ${typeLabel}`,
+        entries: [
+          { key: 'uniquename', value: api.uniquename, label: 'Unique Name' },
+          { key: 'displayname', value: api.displayname, label: 'Display Name' },
+          { key: 'isfunction', value: typeLabel, label: 'Type' },
+          { key: 'binding', value: bindLabel, label: 'Binding' },
+          { key: 'description', value: api.description || '(none)', label: 'Description' },
+        ],
+      }],
+    });
   }
 
   /** Build detail panel data for an entity. */
