@@ -12,7 +12,13 @@
       "Bash(cut -d'{' -f1)",
       "Bash(git commit:*)",
       "Bash(git gc:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(grep -E \"\\\\.\\(css|scss|less\\)$\")",
+      "Bash(grep -l \"bulk-\" \"c:\\\\Users\\\\jwald\\\\CodeReps\\\\DataversePlugin/src/sidepanel/styles/\"*)",
+      "Bash(grep -l \"SVG\\\\|canvas\\\\|draggable\\\\|drag\\\\|D3\\\\|Three\" /c/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/modules/*.js)",
+      "Bash(wc -l c:/Users/jwald/CodeReps/DataversePlugin/src/sidepanel/modules/bulk-ops/*.js)",
+      "Read(//c/Users/jwald/.claude/**)",
+      "Read(//c/Users/jwald/.claude/projects/**)"
     ]
   }
 }

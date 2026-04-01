@@ -4,74 +4,158 @@ A Chrome Extension for Dynamics 365 / Power Platform developers, built entirely 
 
 Every feature was designed and implemented in conversation, from the first API proxy to the force-directed ERD layout. The result is a zero-dependency developer toolkit that runs entirely in the browser.
 
+## Installation
+
+1. [Download the latest release as a ZIP](../../releases/latest) (or clone this repo)
+2. Open `chrome://extensions` in Chrome
+3. Enable **Developer mode** (top right toggle)
+4. Click **Load unpacked** and select the project folder
+5. Navigate to any Dynamics 365 / Power Platform environment and sign in
+6. Open the side panel via the extension icon
+
+**Requirements:** Google Chrome 114+ · Access to a Dynamics 365 / Power Platform environment
+
+---
+
 ## Features
 
 ### API Explorer
-Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, actions, functions, and solutions — with full metadata details and virtual scrolling for large orgs.
+![alt text](image.png)
 
-### FetchXML Builder
-Visual node-card query builder. Each table appears as a card with checkable columns, nested filter groups (AND/OR, type-aware operators, OptionSet dropdowns for picklists), and sort rows with drag-and-drop reordering. Add related tables via a relationship picker (N:1 / 1:N / N:N with OData annotation notes). Switch between FetchXML and OData output. Execute and view results inline. Code generation: C#, JavaScript, Power Automate HTTP action.
+![alt text](image-1.png)
+
+Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, custom APIs (actions/functions), and solutions — with full metadata details and virtual scrolling for large orgs.
+
+---
+
+### Query Builder (FetchXML)
+
+
+
+
+Visual node-card query builder. Each table appears as a card with:
+- Checkable columns with attribute type badges
+- Nested filter groups (AND/OR, type-aware operators, OptionSet dropdowns for picklists)
+- Sort rows with drag-and-drop reordering
+- "+ Add Related Table" with relationship picker (N:1 / 1:N / N:N)
+
+Switch between **FetchXML** and **OData** output. Execute and view results inline. Code generation in C#, JavaScript, and Power Automate HTTP action.
+
+---
 
 ### Request Builder
-Craft any Web API request with entity autocomplete, OData query options (auto-disabled when a record ID is entered), a header preset library, and a full response viewer with syntax highlighting. Requests are saved to history with favorites. Generates code in JavaScript, C#, Python, and cURL.
+<!-- screenshot: request builder with entity autocomplete open, response panel showing JSON -->
+
+Craft any Web API request with entity autocomplete, OData query options (auto-disabled when a record ID is entered), a header preset library, and a full response viewer with syntax highlighting. Requests are saved to history with favorites. Code generation in JavaScript, C#, Python, and cURL.
+
+---
 
 ### Bulk Operations
-Paste a JSON array of operations — each with `method`, `url` (relative to the API base), and optional `body`. The extension assembles and sends a single `$batch` multipart request. Supports the full Dataverse API including metadata operations. Results shown per operation.
+<!-- screenshot: bulk ops tab with two operation cards in different-colored changesets, templates menu open -->
+
+Build and execute `$batch` requests with a wizard system:
+
+| Wizard | What it does |
+|--------|-------------|
+| **Bulk Create** | Form mode or CSV paste → POST operations |
+| **Bulk Update** | OData filter → fetch records → PATCH with new values |
+| **Bulk Delete** | Type entity name to confirm → DELETE operations |
+| **Status Toggle** | Change statecode/statuscode across matching records |
+| **Bulk Assign** | Reassign record ownership to a user or team |
+| **Deep Insert** | POST a parent record with nested child records in one call |
+| **Data Export (CMT)** | Export records as Configuration Migration Tool zip (data_schema.xml + data.xml) |
+| **Data Import (CMT)** | Upload a CMT zip → review entities → upsert or create |
+
+Supports ChangeSets (transactional groups), drag-and-drop reordering, and a guided single-operation builder with type-aware inputs for every field type.
+
+---
 
 ### Security Inspector
-Role-privilege matrix per entity (Create/Read/Write/Delete/Append/AppendTo/Assign/Share with depth indicators), user permission lookup via `RetrieveUserPrivileges`, field-level security profiles, and audit configuration viewer.
+<!-- screenshot: security tab showing role privilege matrix with depth indicators (User/BU/Parent/Org) -->
 
-### Interactive ERD Viewer
-This is where the vibe coding really paid off. Load any unmanaged Dataverse solution and get a fully interactive entity-relationship diagram:
+- Role-privilege matrix per entity (Create/Read/Write/Delete/Append/AppendTo/Assign/Share with depth indicators)
+- User permission lookup via `RetrieveUserPrivileges` (all privileges across direct + team roles)
+- Field-level security profiles
+- Audit configuration viewer
 
-- **Force-directed layout** — entities cluster by relationships using a Fruchterman-Reingold physics simulation. Toggle to grid layout with animated transitions
-- **Entity dragging** — grab any entity and rearrange it, arrows follow in real-time with requestAnimationFrame throttling
-- **Smart field display** — entities show PK, primary name, and FK/lookup fields by default. System lookups (Created By, Modified By, delegates, owning team/user/BU) are hidden by default to reduce noise
-- **FK Fields dropdown** — globally toggle which system lookup fields appear on all entities. "Hide all" instantly declutters the diagram to show only business-relevant relationships
-- **Per-entity column chooser** — right-click any entity to pick exactly which fields to show on that specific box
-- **Expand on double-click** — double-click any entity to see ALL its fields, double-click again to collapse back
-- **Crow's foot notation** — proper ERD markers (||, fork) showing 1:N and N:N cardinality at both ends
-- **N:N relationships** — many-to-many relationships rendered with distinct dotted styling and intersect entity info in tooltips
-- **Orthogonal routing** — clean H-V-H Manhattan-style lines with lane offsets so parallel edges don't overlap. Toggle to Bezier curves
-- **Relationship highlighting** — hover any entity to highlight its connections and fade everything else
-- **Minimap** — canvas-based overview in the bottom-right corner with viewport indicator, click to navigate
-- **Filtering** — text search, "Custom only", "Hide system entities" checkboxes
-- **SVG & PNG export** — download the diagram with all styles inlined and CSS variables resolved. PNG renders at 2x for retina, with theme-colored background
-- **JSON Schema export** — draft-07 schema with Dataverse type extensions (`x-dataverse-type`, `x-dataverse-primaryId`)
-- **Payload export** — example POST body with required fields populated and optional fields included
-- **Keyboard shortcuts** — `+`/`-` zoom, `0` reset, `f` focus filter, `Escape` clear selection
+---
 
-All of this in ~1500 lines of vanilla JS and SVG — no D3, no Cytoscape, no graph library.
+### ERD Viewer
+<!-- screenshot: ERD tab showing 6 entity boxes connected by arrows with crow's foot notation, detail panel open on right -->
 
-### DevTools Panel
-Real-time Dataverse API request logger in Chrome DevTools. Filter, search, and inspect every Web API call made by the extension or the Dynamics 365 app.
+Load any unmanaged Dataverse solution and get a fully interactive entity-relationship diagram:
 
-## Installation
+- **Force-directed layout** with Fruchterman-Reingold physics, toggle to grid with animated transitions
+- **Entity dragging** — grab any box, arrows follow with requestAnimationFrame throttling
+- **Crow's foot notation** — proper ERD markers (||, fork) for 1:N and N:N cardinality
+- **N:N relationships** rendered with distinct dotted styling + intersect entity tooltip
+- **Orthogonal routing** — clean Manhattan-style lines with lane offsets; toggle to Bezier
+- **Relationship highlighting** — hover to highlight connections, fade everything else
+- **Minimap** — canvas overview with viewport indicator, click to navigate
+- **Per-entity column chooser** and FK field filter to reduce visual noise
+- **SVG & PNG export**, **JSON Schema draft-07 export**, **example payload export**
+- **Keyboard shortcuts** — `+`/`-` zoom, `0` reset, `f` filter, `Escape` clear selection
 
-1. Clone this repository
-2. Open `chrome://extensions` in Chrome
-3. Enable **Developer mode** (top right)
-4. Click **Load unpacked** and select the project folder
-5. Navigate to any Dynamics 365 / Power Platform environment and sign in
-6. Open the side panel (click the extension icon)
+All in ~1500 lines of vanilla JS and SVG — no D3, no Cytoscape, no graph library.
 
-## Requirements
+---
 
-- Google Chrome 114+ (Side Panel API)
-- Access to a Dynamics 365 / Power Platform environment
+### Settings
+<!-- screenshot: settings tab showing theme toggle and connection info -->
+
+Theme switching (light/dark), connection status, metadata cache management.
+
+---
 
 ## Architecture
 
-- **No build system** — pure ES modules, no bundler, no transpilation
-- **No external dependencies** — everything built from scratch
-- **Cookie-based auth** — API calls proxy through the page context (MAIN world content script) which has valid session cookies
-- **Background service worker** routes all API calls to avoid CORS restrictions on the side panel
+```
+Dynamics 365 page (*.dynamics.com)
+  └─ content-script.js  (ISOLATED world)
+       └─ page-extractor.js  (MAIN world)  ← runs at org origin, has session cookies
 
-See [CLAUDE.md](CLAUDE.md) for full architecture docs and [skills/](skills/) for Dataverse API patterns.
+Side Panel  ──────────────────────────────────────
+  app.js  (bootstrap, tab routing, MetadataCache)
+  modules/  (one class per tab, lazy-loaded)
+     └─ apiClient.request() → chrome.runtime.sendMessage
+
+Background Service Worker
+  proxyApiRequest() → sendMessage to tab content script
+                          └─ page-extractor.js fetch() → Dataverse Web API
+```
+
+**Why this routing:** The side panel runs at `chrome-extension://`, which is CORS-blocked from all `*.dynamics.com` endpoints. The MAIN world content script runs at the page's own origin and inherits session cookies — no Bearer token needed.
+
+- **No build system** — pure ES modules, no bundler
+- **No external dependencies** — built from scratch
+- **No backend** — everything runs in the browser
+
+---
+
+## Skills & Patterns
+
+The `skills/` folder contains transferable engineering knowledge extracted from building this project. Useful if you want to build something similar:
+
+| Skill | What it covers |
+|-------|---------------|
+| [skills/dataverse-api-gotchas.md](skills/dataverse-api-gotchas.md) | Non-obvious Dataverse Web API behaviors: metadata endpoint limits, privilege resolution, FetchXML URL requirements, N:N expand limitations, `$batch` parsing |
+| [skills/chrome-mv3-patterns.md](skills/chrome-mv3-patterns.md) | Chrome MV3 patterns: CORS bypass via MAIN world content script, service worker state survival, content script re-injection after dev reload, ES modules without bundlers |
+
+See [CLAUDE.md](CLAUDE.md) for full architecture docs used by Claude when working on this project.
+
+---
 
 ## Vibe Coding
 
-This project was built through iterative conversation with Claude — describing features, reviewing screenshots, adjusting behavior, and pushing the boundaries of what's possible without dependencies. The ERD viewer alone went through multiple rounds of "arrows land at the same spot", "layout not optimal", "system fields are cluttering everything" — each fixed in conversation.
+This project was built entirely through iterative conversation with Claude — describing features, reviewing screenshots, adjusting behavior, and pushing the boundaries of what's possible without dependencies.
+
+A few things that stood out:
+
+- **The ERD viewer** went through multiple rounds of layout fixes, arrow routing, system field filtering, and export polish — each fixed in conversation without touching a code editor
+- **The wizard system** (6 wizards + CMT export/import) was built using a parallel subagent wave strategy: foundation modules in wave 1, wizard implementations in wave 2, integration in wave 3 — roughly 4x faster than sequential implementation
+- **Zero dependencies** was a deliberate constraint that forced creative solutions: browser-native zip parsing via `DecompressionStream`, SVG ERD rendering without D3, force-directed layout from scratch with Fruchterman-Reingold physics
+
+The `skills/` folder is a direct byproduct — patterns that emerged from hitting real Dataverse API limitations and Chrome MV3 edge cases, extracted so future Claude sessions (or other developers) can skip the trial and error.
 
 ## License
 
