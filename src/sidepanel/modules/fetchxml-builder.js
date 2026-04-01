@@ -764,6 +764,165 @@ function _condToOData(cond) {
 }
 
 // ---------------------------------------------------------------------------
+// Power Automate helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build OData params object from model (for Dataverse "List rows" connector).
+ * Returns an object suitable for the `parameters` block.
+ */
+function _buildODataParamsObj(model) {
+  const p = {};
+  if (!model.allAttributes && model.attributes.length > 0) {
+    const cols = model.attributes.map(a => a.name).filter(Boolean);
+    if (cols.length) p['$select'] = cols.join(',');
+  }
+  const filterStr = _buildODataFilter(model.filters);
+  if (filterStr) p['$filter'] = filterStr;
+  if (model.orders.length > 0) {
+    p['$orderby'] = model.orders.map(o => `${o.attribute} ${o.descending ? 'desc' : 'asc'}`).join(',');
+  }
+  if (model.top) p['$top'] = model.top;
+  const expands = [];
+  for (const le of (model.linkEntities || [])) {
+    if (le._relMeta?.joinType === 'ManyToMany') continue;
+    const nav = le._relMeta?.navigationProp;
+    if (!nav) continue;
+    const cols = !le.allAttributes && le.attributes.length > 0
+      ? le.attributes.map(a => a.name).filter(Boolean).join(',')
+      : '';
+    expands.push(cols ? `${nav}($select=${cols})` : nav);
+  }
+  if (expands.length) p['$expand'] = expands.join(',');
+  return p;
+}
+
+/**
+ * Power Automate — Dataverse "List rows" connector action.
+ * Returns [{label, code}] with OData and FetchXML tabs.
+ */
+function generatePAListRows(model, entitySetName) {
+  const xml = modelToXml(model);
+  const odataParams = _buildODataParamsObj(model);
+  const host = {
+    connectionName: 'shared_commondataserviceforapps',
+    operationId: 'ListRecords',
+    apiId: '/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps',
+  };
+  const header =
+    '// Power Automate — "List rows" action (Dataverse connector)\n' +
+    '// Auth is handled by the Dataverse connection — no credentials needed here.\n' +
+    '// Paste this into the "List rows" action Code view:\n\n';
+
+  return [
+    {
+      label: 'OData',
+      code: header + JSON.stringify({
+        type: 'OpenApiConnection',
+        inputs: { host, parameters: { entityName: entitySetName, ...odataParams } },
+      }, null, 2),
+    },
+    {
+      label: 'FetchXML',
+      code: header + JSON.stringify({
+        type: 'OpenApiConnection',
+        inputs: { host, parameters: { entityName: entitySetName, fetchXml: xml } },
+      }, null, 2),
+    },
+  ];
+}
+
+/**
+ * Power Automate — HTTP with Microsoft Entra ID (preauthorized) connector.
+ * Returns [{label, code}] with OData and FetchXML tabs.
+ */
+function generatePAHttpEntra(model, entitySetName, orgUrl, attrs) {
+  const xml = modelToXml(model);
+  const odataParams = _buildODataParamsObj(model);
+  const qs = Object.entries(odataParams).map(([k, v]) => `${k}=${v}`).join('&');
+  const relOdataUri = `api/data/v9.2/${entitySetName}${qs ? '?' + qs : ''}`;
+  const relFetchUri = `api/data/v9.2/${entitySetName}?fetchXml=@{encodeUriComponent(variables('FetchXml'))}`;
+
+  const dvHeaders = {
+    'OData-MaxVersion': '4.0',
+    'OData-Version': '4.0',
+    Accept: 'application/json',
+    Prefer: 'odata.include-annotations="*"',
+  };
+
+  const connectionNote =
+    '// ── Connection setup (one-time) ─────────────────────────────────────────────\n' +
+    '// Connector: "HTTP with Microsoft Entra ID (preauthorized)"\n' +
+    `// Base URL:     ${orgUrl || 'https://<org>.crm.dynamics.com'}\n` +
+    `// Redirect URL: ${orgUrl || 'https://<org>.crm.dynamics.com'}\n` +
+    '// The base URL is stored in the connection — only the relative path goes in URI.\n' +
+    '// ─────────────────────────────────────────────────────────────────────────────\n\n';
+
+  const makeAction = (uri) => ({
+    type: 'OpenApiConnection',
+    inputs: {
+      host: {
+        connectionName: 'shared_webcontents',
+        operationId: 'InvokeHttp',
+        apiId: '/providers/Microsoft.PowerApps/apis/shared_webcontents',
+      },
+      parameters: { Uri: uri, Method: 'GET', headers: dvHeaders },
+    },
+  });
+
+  // Build Parse JSON schema for OData response
+  const toJsonType = (dvType) => {
+    switch (dvType) {
+      case 'Integer': case 'BigInt': case 'Decimal': case 'Double': case 'Money': return 'number';
+      case 'Boolean': return 'boolean';
+      default: return 'string';
+    }
+  };
+  const selectedNames = model.allAttributes
+    ? attrs.map(a => a.LogicalName)
+    : (model.attributes || []).map(a => a.name).filter(Boolean);
+  const itemProperties = { '@odata.etag': { type: 'string' } };
+  for (const name of selectedNames) {
+    const meta = attrs.find(a => a.LogicalName === name);
+    itemProperties[name] = { type: toJsonType(meta?.AttributeType) };
+    if (meta?.AttributeType === 'Lookup' || meta?.AttributeType === 'Owner' || meta?.AttributeType === 'Customer') {
+      itemProperties[`_${name}_value`] = { type: 'string' };
+    }
+  }
+  const parseJsonAction = {
+    type: 'ParseJson',
+    inputs: {
+      content: "@body('HTTP')",
+      schema: {
+        type: 'object',
+        properties: {
+          '@odata.context': { type: 'string' },
+          value: { type: 'array', items: { type: 'object', properties: itemProperties } },
+        },
+      },
+    },
+  };
+
+  const odataCode = connectionNote +
+    '// Paste this into the HTTP connector Code view:\n' +
+    JSON.stringify(makeAction(relOdataUri), null, 2) +
+    '\n\n// ── Parse JSON action ─────────────────────────────────────────────────────\n' +
+    JSON.stringify(parseJsonAction, null, 2);
+
+  const fetchCode = connectionNote +
+    '// Step 1 — "Initialize variable" action: name = FetchXml, value =\n' + xml + '\n\n' +
+    '// Step 2 — HTTP connector Code view:\n' +
+    JSON.stringify(makeAction(relFetchUri), null, 2) +
+    '\n\n// ── Parse JSON action ─────────────────────────────────────────────────────\n' +
+    JSON.stringify(parseJsonAction, null, 2);
+
+  return [
+    { label: 'OData', code: odataCode },
+    { label: 'FetchXML', code: fetchCode },
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // FetchXmlBuilder Class – Visual Node-Card Query Builder
 // ---------------------------------------------------------------------------
 
@@ -1743,7 +1902,17 @@ export class FetchXmlBuilder {
         },
       },
       {
-        label: 'Power Automate \u2014 HTTP + Parse JSON',
+        label: 'Power Automate \u2014 List rows (Dataverse)',
+        generate: async () => {
+          const err = this._validateModel(this.model);
+          if (err) { this._showNotification(err, 'error'); return null; }
+          const ent = this._entities.find(e => e.LogicalName === this.model.entity);
+          const entitySetName = ent?.EntitySetName || `${this.model.entity}s`;
+          return generatePAListRows(this.model, entitySetName);
+        },
+      },
+      {
+        label: 'Power Automate \u2014 HTTP (Entra preauthorized)',
         generate: async () => {
           const err = this._validateModel(this.model);
           if (err) { this._showNotification(err, 'error'); return null; }
@@ -1755,7 +1924,48 @@ export class FetchXmlBuilder {
             baseUrl = env?.url || '';
           } catch { /* leave empty */ }
           const attrs = this._attrCache.get(this.model.entity) || [];
-          return generatePowerAutomate(this.model, entitySetName, baseUrl, attrs);
+          return generatePAHttpEntra(this.model, entitySetName, baseUrl, attrs);
+        },
+      },
+      {
+        label: 'Power Automate \u2014 HTTP (App registration)',
+        generate: async () => {
+          const err = this._validateModel(this.model);
+          if (err) { this._showNotification(err, 'error'); return null; }
+          const ent = this._entities.find(e => e.LogicalName === this.model.entity);
+          const entitySetName = ent?.EntitySetName || `${this.model.entity}s`;
+          let baseUrl = '';
+          try {
+            const env = await this.api.getEnvironment();
+            baseUrl = env?.url || '';
+          } catch { /* leave empty */ }
+          const attrs = this._attrCache.get(this.model.entity) || [];
+          // FetchXML tab (existing) + OData tab
+          const fetchTab = { label: 'FetchXML', code: generatePowerAutomate(this.model, entitySetName, baseUrl, attrs) };
+          const odataParams = _buildODataParamsObj(this.model);
+          const qs = Object.entries(odataParams).map(([k, v]) => `${k}=${v}`).join('&');
+          const uri = `${baseUrl}/api/data/v9.2/${entitySetName}${qs ? '?' + qs : ''}`;
+          const httpAction = {
+            type: 'Http',
+            inputs: {
+              method: 'GET',
+              uri,
+              authentication: {
+                type: 'ActiveDirectoryOAuth',
+                tenant: '<tenant-id>',
+                audience: baseUrl || 'https://<org>.crm.dynamics.com',
+                clientId: '<client-id>',
+                secret: '<client-secret>',
+              },
+              headers: { 'OData-MaxVersion': '4.0', 'OData-Version': '4.0', Accept: 'application/json', Prefer: 'odata.include-annotations="*"' },
+            },
+          };
+          const odataTab = {
+            label: 'OData',
+            code: '// Power Automate — HTTP action with App Registration (OData query)\n// Fill in tenant-id, client-id, client-secret from your App Registration.\n\n' +
+              JSON.stringify(httpAction, null, 2),
+          };
+          return [fetchTab, odataTab];
         },
       },
     ];
@@ -1792,6 +2002,10 @@ export class FetchXmlBuilder {
     setTimeout(() => document.addEventListener('click', close, true), 0);
   }
 
+  /**
+   * @param {string} title
+   * @param {string | Array<{label:string, code:string}>} code  - string or tabs array
+   */
   _showCodeModal(title, code) {
     document.getElementById('qb-code-modal')?.remove();
 
@@ -1812,19 +2026,43 @@ export class FetchXmlBuilder {
     closeBtn.addEventListener('click', () => overlay.remove());
     header.append(titleSpan, closeBtn);
 
+    const tabs = Array.isArray(code) ? code : [{ label: null, code }];
+    let activeCode = tabs[0].code;
+
     const pre = document.createElement('pre');
     pre.className = 'qb-code-block';
-    pre.textContent = code;
+    pre.textContent = activeCode;
+
+    // Tab bar (only rendered when multiple tabs)
+    if (tabs.length > 1) {
+      const tabBar = document.createElement('div');
+      tabBar.className = 'qb-code-tabs';
+      tabs.forEach((tab, i) => {
+        const btn = document.createElement('button');
+        btn.className = `qb-code-tab${i === 0 ? ' active' : ''}`;
+        btn.textContent = tab.label;
+        btn.addEventListener('click', () => {
+          tabBar.querySelectorAll('.qb-code-tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          activeCode = tab.code;
+          pre.textContent = activeCode;
+        });
+        tabBar.appendChild(btn);
+      });
+      modal.append(header, tabBar, pre);
+    } else {
+      modal.append(header, pre);
+    }
 
     const footer = document.createElement('div');
     footer.className = 'qb-modal-footer';
     const copyBtn = this._createButton('Copy to Clipboard', 'qb-btn qb-btn-primary', () => {
-      this._copyToClipboard(code);
+      this._copyToClipboard(activeCode);
       this._showNotification('Copied to clipboard', 'success');
     });
     footer.appendChild(copyBtn);
+    modal.appendChild(footer);
 
-    modal.append(header, pre, footer);
     overlay.appendChild(modal);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
@@ -1880,8 +2118,8 @@ export class FetchXmlBuilder {
           badge: 'N:1',
           getLabel: r => `${r.ReferencedEntity} via ${r.ReferencingAttribute}`,
           targetEntity: r => r.ReferencedEntity,
-          from: r => r.ReferencingAttribute,
-          to: r => r.ReferencedAttribute,
+          from: r => r.ReferencedAttribute,
+          to: r => r.ReferencingAttribute,
           navProp: r => r.ReferencedEntityNavigationPropertyName,
           linkType: 'inner',
         },
@@ -1969,6 +2207,12 @@ export class FetchXmlBuilder {
             this._renderCards();
             this._debouncedSync();
             overlay.remove();
+
+            // Achievement triggers
+            import('./easter-eggs.js').then(ee => {
+              ee.unlockAchievement('first_join');
+              if (sec.joinType === 'ManyToMany') ee.unlockAchievement('nn_join');
+            }).catch(() => {});
           });
 
           secEl.appendChild(item);
@@ -2054,7 +2298,7 @@ export class FetchXmlBuilder {
           return `Filter on "${attrLabel}": operator "${opDef.label}" requires a value.`;
         }
       }
-      for (const sub of group.groups || []) {
+      for (const sub of group.filters || []) {
         const err = checkGroup(sub);
         if (err) return err;
       }
@@ -2113,6 +2357,15 @@ export class FetchXmlBuilder {
 
     const records = data.value || (Array.isArray(data) ? data : []);
 
+    // Achievement triggers
+    import('./easter-eggs.js').then(ee => {
+      ee.unlockAchievement('first_query');
+      if (records.length >= 100) ee.unlockAchievement('records_100');
+      if (records.length >= 1000) ee.unlockAchievement('records_1000');
+      if (elapsed != null && elapsed < 50) ee.unlockAchievement('speed_demon');
+      ee.maybeShowClippy('execute');
+    }).catch(() => {});
+
     const toolbar = document.createElement('div');
     toolbar.className = 'qb-results-toolbar';
 
@@ -2134,7 +2387,33 @@ export class FetchXmlBuilder {
       return;
     }
 
-    const columns = Object.keys(records[0]).filter(k => !k.startsWith('@'));
+    // Build column list: start with model-expected columns, then add any extras from data.
+    // Dataverse may omit null-valued fields from the JSON response entirely.
+    const colSet = new Set();
+
+    // Add root entity columns from model
+    if (!this.model.allAttributes) {
+      for (const attr of this.model.attributes) {
+        if (attr.name) colSet.add(attr.name);
+      }
+    }
+    // Add link entity aliased columns
+    for (const le of (this.model.linkEntities || [])) {
+      const prefix = le.alias || le.name;
+      if (!le.allAttributes) {
+        for (const attr of (le.attributes || [])) {
+          if (attr.name) colSet.add(`${prefix}.${attr.name}`);
+        }
+      }
+    }
+
+    // Also add any columns from actual response data (catches PK, odata fields, etc.)
+    for (const rec of records) {
+      for (const k of Object.keys(rec)) {
+        if (!k.startsWith('@')) colSet.add(k);
+      }
+    }
+    const columns = [...colSet];
     const wrap = document.createElement('div');
     wrap.className = 'qb-results-wrap';
 
@@ -2237,6 +2516,7 @@ export class FetchXmlBuilder {
     try {
       await navigator.clipboard.writeText(text);
       this._showNotification('Copied to clipboard', 'success');
+      import('./easter-eggs.js').then(ee => ee.trackClipboard()).catch(() => {});
     } catch (err) {
       this._showNotification(`Copy failed: ${err.message || 'check clipboard permissions'}`, 'error');
     }

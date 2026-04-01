@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 const TAB_DEFINITIONS = Object.freeze([
   { id: 'explorer', label: 'Explorer', icon: '\uD83D\uDD0D' },
-  { id: 'fetchxml', label: 'FetchXML', icon: '\uD83D\uDCC4' },
+  { id: 'fetchxml', label: 'Query', icon: '\uD83D\uDCC4' },
   { id: 'request', label: 'Request', icon: '\u26A1' },
   { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6' },
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12' },
@@ -226,6 +226,13 @@ class DataverseToolkit {
     this._attachKeyboardShortcuts();
     await this._checkConnection();
 
+    // Easter eggs — lazy-loaded, zero impact on normal flow
+    import('./modules/easter-eggs.js').then(ee => {
+      this._ee = ee;
+      ee.initKonamiListener();
+      ee.checkTimeAchievements();
+    }).catch(() => {});
+
     // Set up periodic connection checks
     setInterval(() => this._checkConnection(), 30000);
 
@@ -249,6 +256,10 @@ class DataverseToolkit {
         this._environment = env;
         this._updateConnectionStatus(true, env);
         this.events.emit('connected', env);
+        // Auto-load the active tab on first connection
+        if (!this._modules[this._activeTab]) {
+          this._initModule(this._activeTab);
+        }
       } else {
         this._setDisconnected();
       }

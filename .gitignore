@@ -27,3 +27,6 @@ credentials.json
 # Build artifacts
 dist/
 build/
+
+# Claude Code local config (contains machine-specific paths)
+.claude/

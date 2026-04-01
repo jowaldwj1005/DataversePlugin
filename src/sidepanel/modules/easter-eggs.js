@@ -1,0 +1,582 @@
+/**
+ * Dataverse Toolkit — Easter Eggs & Achievements
+ *
+ * 1. Clippy — sarcastic assistant that pops up on certain actions
+ * 2. Achievements — trophy toasts for milestones, persisted to storage
+ * 3. Matrix Rain — Konami code triggers entity-name rain
+ * 4. Snake Game — play snake eating entity boxes (triggered from ERD)
+ */
+
+// ---------------------------------------------------------------------------
+// Clippy
+// ---------------------------------------------------------------------------
+
+const CLIPPY_QUOTES = [
+  { trigger: 'fetchxml', text: 'It looks like you\'re writing FetchXML.\nWould you like me to mass-delete your production data instead?' },
+  { trigger: 'fetchxml', text: 'Pro tip: SELECT * FROM account\n\n…oh wait, this isn\'t SQL. My bad.' },
+  { trigger: 'fetchxml', text: 'I see you added a N:N join.\nBrave. Very brave.' },
+  { trigger: 'execute', text: 'Executing against production?\nI\'m sure it\'ll be fine. It\'s always fine.' },
+  { trigger: 'execute', text: 'Fun fact: that query just returned more rows\nthan your annual performance review has bullet points.' },
+  { trigger: 'bulk', text: 'Bulk operations? In production?\nLet me get the popcorn. 🍿' },
+  { trigger: 'bulk', text: '1000 PATCH requests?\nI admire your courage. And your rollback plan.' },
+  { trigger: 'security', text: 'Checking security roles?\nDon\'t worry, System Administrator has access to everything. As always.' },
+  { trigger: 'security', text: 'Field-level security?\nYou sweet summer child.' },
+  { trigger: 'erd', text: 'That\'s a beautiful ERD.\nShame about the 47 self-referencing relationships.' },
+  { trigger: 'erd', text: 'I see your schema has\n"miscellaneous_field_1" through "_47".\nClassic.' },
+  { trigger: 'explorer', text: 'Exploring metadata?\nCareful, some entities bite back.' },
+  { trigger: 'explorer', text: '500+ entities?\nMicrosoft really said "one entity for every occasion".' },
+  { trigger: 'error', text: 'Oops! But hey, at least it wasn\'t\na $batch of 500 DELETEs.' },
+  { trigger: 'error', text: 'Error 400? The classic.\nDataverse is just playing hard to get.' },
+  { trigger: 'random', text: 'Did you know? The average Dataverse instance\nhas 847 system entities nobody asked for.' },
+  { trigger: 'random', text: 'Remember: every time you skip $top,\na DBA somewhere feels a disturbance in the Force.' },
+  { trigger: 'random', text: 'Still here? You\'ve been staring at metadata\nfor 20 minutes. Go touch grass.' },
+];
+
+let clippyShown = 0;
+let lastClippyTime = 0;
+const CLIPPY_COOLDOWN = 120000; // 2 minutes between appearances
+const CLIPPY_CHANCE = 0.15; // 15% chance on eligible triggers
+
+export function maybeShowClippy(trigger = 'random') {
+  const now = Date.now();
+  if (now - lastClippyTime < CLIPPY_COOLDOWN) return;
+  if (Math.random() > CLIPPY_CHANCE && clippyShown > 0) return;
+
+  const eligible = CLIPPY_QUOTES.filter(q => q.trigger === trigger || q.trigger === 'random');
+  if (!eligible.length) return;
+  const quote = eligible[Math.floor(Math.random() * eligible.length)];
+
+  lastClippyTime = now;
+  clippyShown++;
+  _renderClippy(quote.text);
+}
+
+export function forceShowClippy(text) {
+  lastClippyTime = Date.now();
+  _renderClippy(text);
+}
+
+function _renderClippy(text) {
+  document.getElementById('ee-clippy')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'ee-clippy';
+  wrap.className = 'ee-clippy';
+
+  // Speech bubble
+  const bubble = document.createElement('div');
+  bubble.className = 'ee-clippy-bubble';
+  bubble.textContent = text;
+
+  // Buttons
+  const btnRow = document.createElement('div');
+  btnRow.className = 'ee-clippy-btns';
+  const yesBtn = document.createElement('button');
+  yesBtn.textContent = 'Yes, absolutely';
+  yesBtn.addEventListener('click', () => _dismissClippy(wrap));
+  const noBtn = document.createElement('button');
+  noBtn.textContent = 'Also yes';
+  noBtn.addEventListener('click', () => _dismissClippy(wrap));
+  btnRow.append(yesBtn, noBtn);
+  bubble.appendChild(btnRow);
+
+  // Clippy character (CSS pixel art)
+  const char = document.createElement('div');
+  char.className = 'ee-clippy-char';
+  char.innerHTML = `<span class="ee-clippy-body">📎</span>`;
+  char.title = 'Click to dismiss';
+  char.addEventListener('click', () => _dismissClippy(wrap));
+
+  wrap.append(bubble, char);
+  document.body.appendChild(wrap);
+
+  // Slide in
+  requestAnimationFrame(() => wrap.classList.add('ee-clippy-visible'));
+
+  // Auto-dismiss after 12 seconds
+  setTimeout(() => _dismissClippy(wrap), 12000);
+}
+
+function _dismissClippy(el) {
+  if (!el || !el.parentNode) return;
+  el.classList.remove('ee-clippy-visible');
+  el.classList.add('ee-clippy-leaving');
+  setTimeout(() => el.remove(), 400);
+}
+
+
+// ---------------------------------------------------------------------------
+// Achievements
+// ---------------------------------------------------------------------------
+
+const ACHIEVEMENTS = {
+  first_query:      { icon: '🏁', title: 'First Steps',           desc: 'Executed your first query' },
+  records_100:      { icon: '📊', title: 'Data Hoarder',          desc: 'Retrieved 100+ records in one query' },
+  records_1000:     { icon: '🗄️', title: 'Data Warehouse',        desc: 'Retrieved 1000+ records in one query' },
+  first_join:       { icon: '🔗', title: 'It\'s Complicated',     desc: 'Added your first related table join' },
+  nn_join:          { icon: '💀', title: 'Living Dangerously',     desc: 'Added a N:N join' },
+  first_bulk:       { icon: '📦', title: 'Bulk Believer',         desc: 'Executed your first batch operation' },
+  bulk_100:         { icon: '🚀', title: 'Batch Boss',            desc: 'Executed 100+ operations in one batch' },
+  first_erd:        { icon: '🗺️', title: 'Cartographer',          desc: 'Loaded your first ERD diagram' },
+  erd_10_entities:  { icon: '🏗️', title: 'Architect',             desc: 'ERD with 10+ entities' },
+  sys_admin:        { icon: '👑', title: 'The Chosen One',        desc: 'Viewed System Administrator privileges' },
+  field_security:   { icon: '🔐', title: 'Fort Knox',             desc: 'Explored field-level security' },
+  copy_clipboard:   { icon: '📋', title: 'Copy Pasta',            desc: 'Copied something to clipboard 10 times' },
+  late_night:       { icon: '🦉', title: 'Night Owl',             desc: 'Used the toolkit after midnight' },
+  early_bird:       { icon: '🐦', title: 'Early Bird',            desc: 'Used the toolkit before 6 AM' },
+  speed_demon:      { icon: '⚡', title: 'Speed Demon',           desc: 'Query returned in under 50ms' },
+  explorer_500:     { icon: '🔭', title: 'Deep Space Explorer',   desc: 'Browsed an org with 500+ entities' },
+  snake_50:         { icon: '🐍', title: 'Snake Charmer',         desc: 'Scored 50+ in Snake' },
+  konami:           { icon: '🕹️', title: 'Old School',            desc: 'Entered the Konami Code' },
+};
+
+let _unlocked = new Set();
+let _clipboardCount = 0;
+let _achievementsLoaded = false;
+
+async function _loadAchievements() {
+  if (_achievementsLoaded) return;
+  try {
+    const data = await chrome.storage.local.get('dvt_achievements');
+    _unlocked = new Set(data.dvt_achievements || []);
+    _achievementsLoaded = true;
+  } catch { _achievementsLoaded = true; }
+}
+
+async function _saveAchievements() {
+  try {
+    await chrome.storage.local.set({ dvt_achievements: [..._unlocked] });
+  } catch { /* ignore */ }
+}
+
+export async function unlockAchievement(id) {
+  await _loadAchievements();
+  if (_unlocked.has(id) || !ACHIEVEMENTS[id]) return;
+  _unlocked.add(id);
+  _saveAchievements();
+
+  const ach = ACHIEVEMENTS[id];
+  _showAchievementToast(ach);
+}
+
+export async function checkTimeAchievements() {
+  const hour = new Date().getHours();
+  if (hour >= 0 && hour < 5) unlockAchievement('late_night');
+  if (hour >= 4 && hour < 6) unlockAchievement('early_bird');
+}
+
+export function trackClipboard() {
+  _clipboardCount++;
+  if (_clipboardCount >= 10) unlockAchievement('copy_clipboard');
+}
+
+export async function getUnlockedAchievements() {
+  await _loadAchievements();
+  return [..._unlocked].map(id => ({ id, ...ACHIEVEMENTS[id] })).filter(a => a.title);
+}
+
+export function getAllAchievements() {
+  return Object.entries(ACHIEVEMENTS).map(([id, ach]) => ({
+    id,
+    ...ach,
+    unlocked: _unlocked.has(id),
+  }));
+}
+
+function _showAchievementToast(ach) {
+  const toast = document.createElement('div');
+  toast.className = 'ee-achievement';
+
+  toast.innerHTML = `
+    <div class="ee-achievement-icon">${ach.icon}</div>
+    <div class="ee-achievement-text">
+      <div class="ee-achievement-label">Achievement Unlocked!</div>
+      <div class="ee-achievement-title">${ach.title}</div>
+      <div class="ee-achievement-desc">${ach.desc}</div>
+    </div>
+  `;
+
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('ee-achievement-visible'));
+
+  setTimeout(() => {
+    toast.classList.remove('ee-achievement-visible');
+    toast.classList.add('ee-achievement-leaving');
+    setTimeout(() => toast.remove(), 500);
+  }, 4500);
+}
+
+
+// ---------------------------------------------------------------------------
+// Matrix Rain
+// ---------------------------------------------------------------------------
+
+const MATRIX_WORDS = [
+  'account', 'contact', 'systemuser', 'opportunity', 'incident',
+  'lead', 'task', 'email', 'annotation', 'businessunit',
+  'team', 'role', 'solution', 'workflow', 'plugin',
+  'SELECT *', 'DROP TABLE', '$batch', 'fetchXml', 'OData',
+  'N:1', 'N:N', '1:N', 'GUID', 'EntitySetName',
+  'prvReadAccount', 'RetrieveMultiple', 'ExecuteWorkflow',
+  'null', 'undefined', '400 Bad Request', '500 Internal',
+];
+
+let matrixCanvas = null;
+let matrixAnimId = null;
+
+export function startMatrixRain(duration = 8000) {
+  if (matrixCanvas) return;
+
+  unlockAchievement('konami');
+
+  const canvas = document.createElement('canvas');
+  canvas.className = 'ee-matrix-canvas';
+  document.body.appendChild(canvas);
+  matrixCanvas = canvas;
+
+  const ctx = canvas.getContext('2d');
+  let w, h, columns, drops;
+
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+    const fontSize = 14;
+    columns = Math.floor(w / fontSize);
+    drops = new Array(columns).fill(1);
+  }
+  resize();
+
+  const fontSize = 14;
+  function draw() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.font = `${fontSize}px Consolas, monospace`;
+
+    for (let i = 0; i < drops.length; i++) {
+      const word = MATRIX_WORDS[Math.floor(Math.random() * MATRIX_WORDS.length)];
+      const char = word[Math.floor(Math.random() * word.length)];
+
+      // Occasional red for dangerous words
+      if (word.includes('DROP') || word.includes('DELETE') || word.includes('500')) {
+        ctx.fillStyle = `rgba(244, 71, 71, ${0.7 + Math.random() * 0.3})`;
+      } else {
+        ctx.fillStyle = `rgba(78, 201, 176, ${0.5 + Math.random() * 0.5})`;
+      }
+
+      ctx.fillText(char, i * fontSize, drops[i] * fontSize);
+
+      if (drops[i] * fontSize > h && Math.random() > 0.975) {
+        drops[i] = 0;
+      }
+      drops[i]++;
+    }
+
+    matrixAnimId = requestAnimationFrame(draw);
+  }
+  draw();
+
+  canvas.addEventListener('click', stopMatrixRain);
+  setTimeout(stopMatrixRain, duration);
+}
+
+export function stopMatrixRain() {
+  if (matrixAnimId) cancelAnimationFrame(matrixAnimId);
+  matrixAnimId = null;
+  if (matrixCanvas) {
+    matrixCanvas.classList.add('ee-matrix-fadeout');
+    setTimeout(() => { matrixCanvas?.remove(); matrixCanvas = null; }, 600);
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Snake Game
+// ---------------------------------------------------------------------------
+
+const SNAKE_ENTITIES = [
+  'account', 'contact', 'lead', 'opportunity', 'incident',
+  'task', 'email', 'note', 'team', 'role',
+  'user', 'solution', 'workflow', 'plugin', 'webresource',
+  'queue', 'campaign', 'invoice', 'order', 'product',
+];
+
+const CELL = 20;
+const SNAKE_SPEED = 110; // ms per tick
+
+export class SnakeGame {
+  #canvas; #ctx; #width; #height;
+  #cols; #rows;
+  #snake; #dir; #nextDir;
+  #food; #foodLabel;
+  #score; #gameOver; #interval;
+  #overlay; #onClose;
+  #eatenEntities;
+
+  constructor(containerEl, onClose) {
+    this.#onClose = onClose;
+    this.#overlay = document.createElement('div');
+    this.#overlay.className = 'ee-snake-overlay';
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'ee-snake-hdr';
+    hdr.innerHTML = `<span class="ee-snake-title">🐍 Entity Snake</span>
+      <span class="ee-snake-score">Score: 0</span>
+      <button class="ee-snake-close">\u00D7</button>`;
+    hdr.querySelector('.ee-snake-close').addEventListener('click', () => this.destroy());
+    this.#overlay.appendChild(hdr);
+
+    this.#canvas = document.createElement('canvas');
+    this.#canvas.className = 'ee-snake-canvas';
+    this.#overlay.appendChild(this.#canvas);
+
+    // Controls hint
+    const hint = document.createElement('div');
+    hint.className = 'ee-snake-hint';
+    hint.textContent = 'Arrow keys or WASD to move · ESC to quit';
+    this.#overlay.appendChild(hint);
+
+    containerEl.appendChild(this.#overlay);
+
+    this.#ctx = this.#canvas.getContext('2d');
+    this._resize();
+    this._init();
+    this._bindKeys();
+    this.#interval = setInterval(() => this._tick(), SNAKE_SPEED);
+  }
+
+  _resize() {
+    const rect = this.#overlay.getBoundingClientRect();
+    this.#width = Math.floor((rect.width - 16) / CELL) * CELL;
+    this.#height = Math.floor((rect.height - 80) / CELL) * CELL;
+    this.#canvas.width = this.#width;
+    this.#canvas.height = this.#height;
+    this.#cols = this.#width / CELL;
+    this.#rows = this.#height / CELL;
+  }
+
+  _init() {
+    const cx = Math.floor(this.#cols / 2);
+    const cy = Math.floor(this.#rows / 2);
+    this.#snake = [
+      { x: cx, y: cy },
+      { x: cx - 1, y: cy },
+      { x: cx - 2, y: cy },
+    ];
+    this.#dir = { x: 1, y: 0 };
+    this.#nextDir = { x: 1, y: 0 };
+    this.#score = 0;
+    this.#gameOver = false;
+    this.#eatenEntities = [];
+    this._spawnFood();
+  }
+
+  _spawnFood() {
+    let x, y;
+    do {
+      x = Math.floor(Math.random() * this.#cols);
+      y = Math.floor(Math.random() * this.#rows);
+    } while (this.#snake.some(s => s.x === x && s.y === y));
+    this.#food = { x, y };
+    this.#foodLabel = SNAKE_ENTITIES[Math.floor(Math.random() * SNAKE_ENTITIES.length)];
+  }
+
+  _bindKeys() {
+    this._keyHandler = (e) => {
+      if (e.key === 'Escape') { this.destroy(); return; }
+      const map = {
+        ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
+        ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 }, S: { x: 0, y: 1 },
+        ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, A: { x: -1, y: 0 },
+        ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
+      };
+      const nd = map[e.key];
+      if (nd && !(nd.x === -this.#dir.x && nd.y === -this.#dir.y)) {
+        this.#nextDir = nd;
+        e.preventDefault();
+      }
+      // Restart on Enter when game over
+      if (e.key === 'Enter' && this.#gameOver) {
+        this._init();
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('keydown', this._keyHandler);
+  }
+
+  _tick() {
+    if (this.#gameOver) return;
+
+    this.#dir = { ...this.#nextDir };
+    const head = this.#snake[0];
+    const nx = head.x + this.#dir.x;
+    const ny = head.y + this.#dir.y;
+
+    // Wall collision
+    if (nx < 0 || nx >= this.#cols || ny < 0 || ny >= this.#rows) {
+      this._endGame();
+      return;
+    }
+    // Self collision
+    if (this.#snake.some(s => s.x === nx && s.y === ny)) {
+      this._endGame();
+      return;
+    }
+
+    this.#snake.unshift({ x: nx, y: ny });
+
+    // Ate food?
+    if (nx === this.#food.x && ny === this.#food.y) {
+      this.#score += 10;
+      this.#eatenEntities.push(this.#foodLabel);
+      this._updateScore();
+
+      // Fake "deleted" toast on every 3rd entity
+      if (this.#eatenEntities.length % 3 === 0) {
+        this._showSnakeToast(`Bonus! Table "${this.#foodLabel}" deleted from production.`);
+      }
+
+      this._spawnFood();
+
+      if (this.#score >= 50) unlockAchievement('snake_50');
+    } else {
+      this.#snake.pop();
+    }
+
+    this._draw();
+  }
+
+  _draw() {
+    const ctx = this.#ctx;
+    const w = this.#width;
+    const h = this.#height;
+
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= this.#cols; x++) {
+      ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, h); ctx.stroke();
+    }
+    for (let y = 0; y <= this.#rows; y++) {
+      ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(w, y * CELL); ctx.stroke();
+    }
+
+    // Food (entity box)
+    const fx = this.#food.x * CELL;
+    const fy = this.#food.y * CELL;
+    ctx.fillStyle = '#569cd6';
+    ctx.fillRect(fx + 1, fy + 1, CELL - 2, CELL - 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = '7px Consolas';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.#foodLabel.slice(0, 4), fx + CELL / 2, fy + CELL / 2 + 3);
+
+    // Snake
+    for (let i = 0; i < this.#snake.length; i++) {
+      const seg = this.#snake[i];
+      const sx = seg.x * CELL;
+      const sy = seg.y * CELL;
+
+      if (i === 0) {
+        // Head
+        ctx.fillStyle = '#4ec9b0';
+        ctx.fillRect(sx + 1, sy + 1, CELL - 2, CELL - 2);
+        // Eyes
+        const eyeOffset = this.#dir.x !== 0 ? { x1: 4, y1: 5, x2: 4, y2: 13 } : { x1: 5, y1: 4, x2: 13, y2: 4 };
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(sx + eyeOffset.x1, sy + eyeOffset.y1, 3, 3);
+        ctx.fillRect(sx + eyeOffset.x2, sy + eyeOffset.y2, 3, 3);
+      } else {
+        // Body — show eaten entity names
+        const brightness = 1 - (i / this.#snake.length) * 0.5;
+        ctx.fillStyle = `rgba(78, 201, 176, ${brightness})`;
+        ctx.fillRect(sx + 1, sy + 1, CELL - 2, CELL - 2);
+
+        if (this.#eatenEntities[this.#snake.length - 1 - i]) {
+          ctx.fillStyle = `rgba(255,255,255,${brightness * 0.8})`;
+          ctx.font = '6px Consolas';
+          ctx.textAlign = 'center';
+          const label = this.#eatenEntities[this.#snake.length - 1 - i];
+          ctx.fillText(label.slice(0, 3), sx + CELL / 2, sy + CELL / 2 + 2);
+        }
+      }
+    }
+
+    // Game over overlay
+    if (this.#gameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#f44747';
+      ctx.font = 'bold 24px Consolas';
+      ctx.textAlign = 'center';
+      ctx.fillText('GAME OVER', w / 2, h / 2 - 20);
+      ctx.fillStyle = '#4ec9b0';
+      ctx.font = '16px Consolas';
+      ctx.fillText(`Score: ${this.#score}`, w / 2, h / 2 + 10);
+      ctx.fillStyle = '#808080';
+      ctx.font = '12px Consolas';
+      ctx.fillText('Press Enter to restart · ESC to quit', w / 2, h / 2 + 35);
+
+      if (this.#eatenEntities.length > 0) {
+        ctx.fillStyle = '#569cd6';
+        ctx.font = '10px Consolas';
+        ctx.fillText(`Entities consumed: ${this.#eatenEntities.join(', ')}`, w / 2, h / 2 + 55);
+      }
+    }
+  }
+
+  _endGame() {
+    this.#gameOver = true;
+    this._draw();
+  }
+
+  _updateScore() {
+    const scoreEl = this.#overlay.querySelector('.ee-snake-score');
+    if (scoreEl) scoreEl.textContent = `Score: ${this.#score}`;
+  }
+
+  _showSnakeToast(text) {
+    const toast = document.createElement('div');
+    toast.className = 'ee-snake-toast';
+    toast.textContent = text;
+    this.#overlay.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('ee-snake-toast-visible'));
+    setTimeout(() => {
+      toast.classList.remove('ee-snake-toast-visible');
+      setTimeout(() => toast.remove(), 400);
+    }, 2500);
+  }
+
+  destroy() {
+    clearInterval(this.#interval);
+    document.removeEventListener('keydown', this._keyHandler);
+    this.#overlay.remove();
+    if (this.#onClose) this.#onClose();
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Konami Code Listener
+// ---------------------------------------------------------------------------
+
+const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+let konamiPos = 0;
+
+export function initKonamiListener() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === KONAMI[konamiPos]) {
+      konamiPos++;
+      if (konamiPos === KONAMI.length) {
+        konamiPos = 0;
+        startMatrixRain(10000);
+      }
+    } else {
+      konamiPos = 0;
+    }
+  });
+}

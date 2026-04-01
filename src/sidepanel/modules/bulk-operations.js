@@ -74,8 +74,8 @@ function generateChangeSetBoundary() {
  * @type {string[]}
  */
 const CHANGESET_COLORS = [
-  '#e3f2fd', '#e8f5e9', '#fff3e0', '#fce4ec', '#f3e5f5',
-  '#e0f7fa', '#fff8e1', '#f1f8e9', '#ede7f6', '#e8eaf6',
+  '#569cd6', '#4ec9b0', '#ce9178', '#c586c0', '#dcdcaa',
+  '#4fc1ff', '#d7ba7d', '#9cdcfe', '#b5cea8', '#d4d4d4',
 ];
 
 let colorIndex = 0;
@@ -496,13 +496,28 @@ export class BulkOperations {
     panel.appendChild(exampleToggle);
     panel.appendChild(exampleBlock);
 
-    // Textarea
-    const textarea = document.createElement('textarea');
-    textarea.className = 'bulk-json-textarea';
-    textarea.placeholder = '[{ "method": "POST", "url": "accounts", "body": { "name": "Contoso" } }, ...]';
-    textarea.rows = 8;
-    this._jsonTextarea = textarea;
-    panel.appendChild(textarea);
+    // Dynamic textarea (auto-resizes with content)
+    import('./bulk-ops/dynamic-textarea.js').then(({ createDynamicTextarea }) => {
+      const dt = createDynamicTextarea({
+        placeholder: '[{ "method": "POST", "url": "accounts", "body": { "name": "Contoso" } }, ...]',
+        className: 'bulk-json-textarea',
+        minRows: 3,
+        maxHeight: '40vh',
+      });
+      // dt.element is the wrapper div; the inner textarea is the second child
+      const innerTextarea = dt.element.querySelector('textarea');
+      this._jsonTextarea = innerTextarea || dt.element;
+      this._jsonTextareaCtrl = dt;
+      panel.insertBefore(dt.element, errorEl);
+    }).catch(() => {
+      // Fallback: plain textarea
+      const textarea = document.createElement('textarea');
+      textarea.className = 'bulk-json-textarea';
+      textarea.placeholder = '[{ "method": "POST", "url": "accounts", "body": { "name": "Contoso" } }, ...]';
+      textarea.rows = 8;
+      this._jsonTextarea = textarea;
+      panel.insertBefore(textarea, errorEl);
+    });
 
     // Parse error display
     const errorEl = document.createElement('div');
@@ -875,7 +890,11 @@ export class BulkOperations {
     const group = document.createElement('div');
     group.className = 'bulk-changeset-group';
     group.style.borderLeftColor = cs.color;
-    group.style.backgroundColor = cs.color;
+    // Parse hex to rgba with low opacity for subtle background tint
+    const r = parseInt(cs.color.slice(1, 3), 16);
+    const g = parseInt(cs.color.slice(3, 5), 16);
+    const b = parseInt(cs.color.slice(5, 7), 16);
+    group.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.08)`;
 
     // Header
     const header = document.createElement('div');
@@ -972,10 +991,15 @@ export class BulkOperations {
       }
     });
 
+    // Drag handle
+    const grip = document.createElement('span');
+    grip.className = 'bulk-drag-handle';
+    grip.textContent = '\u2261';
+    grip.title = 'Drag to reorder';
+
     // Method badge
     const methodBadge = document.createElement('span');
-    methodBadge.className = 'bulk-method-badge';
-    methodBadge.style.backgroundColor = METHOD_COLORS[op.method] || '#888';
+    methodBadge.className = `bulk-method-badge bulk-method-${op.method.toLowerCase()}`;
     methodBadge.textContent = op.method;
 
     // URL / description
@@ -990,23 +1014,24 @@ export class BulkOperations {
     statusEl.textContent = op.status;
 
     // Result indicator
+    const resultBadge = document.createElement('span');
+    resultBadge.className = 'bulk-op-result';
     if (op.result) {
-      const resultBadge = document.createElement('span');
-      resultBadge.className = 'bulk-op-result';
-      resultBadge.style.color = op.result.status >= 200 && op.result.status < 300 ? '#49cc90' : '#f93e3e';
+      const ok = op.result.status >= 200 && op.result.status < 300;
+      resultBadge.classList.add(ok ? 'bulk-result-ok' : 'bulk-result-err');
       resultBadge.textContent = op.result.status ? `${op.result.status}` : '';
-      card.appendChild(resultBadge);
     }
 
-    // Edit button
+    // Action buttons wrapper
+    const actions = document.createElement('span');
+    actions.className = 'bulk-op-actions';
     const editBtn = this._createButton('Edit', 'btn-outline btn-xs', () => this._showEditOperationDialog(op));
-
-    // Remove button
     const removeBtn = this._createButton('\u00d7', 'btn-danger btn-xs', () => {
       this.removeOperation(op.id);
     });
+    actions.append(editBtn, removeBtn);
 
-    card.append(methodBadge, desc, statusEl, editBtn, removeBtn);
+    card.append(grip, methodBadge, desc, statusEl, resultBadge, actions);
     container.appendChild(card);
   }
 
@@ -1022,8 +1047,23 @@ export class BulkOperations {
   // Operation Dialogs
   // -------------------------------------------------------------------------
 
-  /** Show the Add Operation dialog. */
-  _showAddOperationDialog() {
+  /** Show the Add Operation dialog (enhanced with Entity Body Builder). */
+  async _showAddOperationDialog() {
+    try {
+      const { EntityBodyBuilder } = await import('./bulk-ops/entity-body-builder.js');
+      const builder = new EntityBodyBuilder(this.metadataCache);
+      const result = await builder.show(this.container, { changeSets: this.changeSets });
+      if (result) {
+        this.addOperation(result);
+      }
+    } catch {
+      // Fallback: simple raw dialog
+      this._showAddOperationDialogSimple();
+    }
+  }
+
+  /** Fallback Add Operation dialog (no metadata, raw JSON). */
+  _showAddOperationDialogSimple() {
     const overlay = this._createOverlay();
     const dialog = document.createElement('div');
     dialog.className = 'bulk-dialog';
@@ -1032,7 +1072,6 @@ export class BulkOperations {
     title.textContent = 'Add Operation';
     dialog.appendChild(title);
 
-    // Method
     const methodRow = this._createFormRow('Method');
     const methodSelect = document.createElement('select');
     methodSelect.className = 'bulk-select';
@@ -1042,25 +1081,14 @@ export class BulkOperations {
     methodRow.appendChild(methodSelect);
     dialog.appendChild(methodRow);
 
-    // URL
     const urlRow = this._createFormRow('URL (relative)');
     const urlInput = document.createElement('input');
     urlInput.type = 'text';
     urlInput.className = 'bulk-input';
-    urlInput.placeholder = 'accounts or accounts(00000000-0000-0000-0000-000000000000)';
+    urlInput.placeholder = 'accounts or accounts(guid)';
     urlRow.appendChild(urlInput);
     dialog.appendChild(urlRow);
 
-    // Description
-    const descRow = this._createFormRow('Description');
-    const descInput = document.createElement('input');
-    descInput.type = 'text';
-    descInput.className = 'bulk-input';
-    descInput.placeholder = 'Optional description';
-    descRow.appendChild(descInput);
-    dialog.appendChild(descRow);
-
-    // Body
     const bodyRow = this._createFormRow('Body (JSON)');
     const bodyTextarea = document.createElement('textarea');
     bodyTextarea.className = 'bulk-textarea';
@@ -1069,41 +1097,17 @@ export class BulkOperations {
     bodyRow.appendChild(bodyTextarea);
     dialog.appendChild(bodyRow);
 
-    // ChangeSet assignment
-    const csRow = this._createFormRow('ChangeSet');
-    const csSelect = document.createElement('select');
-    csSelect.className = 'bulk-select';
-    csSelect.innerHTML = '<option value="">(None - standalone)</option>';
-    for (const cs of this.changeSets) {
-      csSelect.innerHTML += `<option value="${cs.id}">${cs.label}</option>`;
-    }
-    csRow.appendChild(csSelect);
-    dialog.appendChild(csRow);
-
-    // Buttons
     const btnRow = document.createElement('div');
     btnRow.className = 'bulk-dialog-buttons';
-
     const addBtn = this._createButton('Add', 'btn-primary', () => {
       let body = null;
       if (bodyTextarea.value.trim()) {
-        try {
-          body = JSON.parse(bodyTextarea.value);
-        } catch (err) {
-          this._showNotification(`Invalid JSON: ${err.message}`, 'error');
-          return;
-        }
+        try { body = JSON.parse(bodyTextarea.value); }
+        catch (err) { this._showNotification(`Invalid JSON: ${err.message}`, 'error'); return; }
       }
-      this.addOperation({
-        method: methodSelect.value,
-        url: urlInput.value,
-        body,
-        description: descInput.value,
-        changeSetId: csSelect.value || null,
-      });
+      this.addOperation({ method: methodSelect.value, url: urlInput.value, body });
       overlay.remove();
     });
-
     const cancelBtn = this._createButton('Cancel', 'btn-secondary', () => overlay.remove());
     btnRow.append(addBtn, cancelBtn);
     dialog.appendChild(btnRow);
@@ -1226,36 +1230,31 @@ export class BulkOperations {
     const menu = document.createElement('div');
     menu.className = 'bulk-dropdown-menu';
 
-    const templates = [
-      {
-        name: 'Bulk Create from JSON',
-        action: () => this._templateBulkCreateJson(),
-      },
-      {
-        name: 'Bulk Update (FetchXML + updates)',
-        action: () => this._templateBulkUpdate(),
-      },
-      {
-        name: 'Bulk Delete (FetchXML)',
-        action: () => this._templateBulkDelete(),
-      },
-      {
-        name: 'Bulk Associate',
-        action: () => this._templateBulkAssociate(),
-      },
-      {
-        name: 'Bulk Disassociate',
-        action: () => this._templateBulkDisassociate(),
-      },
+    const wizards = [
+      { name: 'Bulk Create',     icon: '\u2795', file: 'wizard-bulk-create',    cls: 'BulkCreateWizard' },
+      { name: 'Bulk Update',     icon: '\u270F\uFE0F', file: 'wizard-bulk-update',    cls: 'BulkUpdateWizard' },
+      { name: 'Bulk Delete',     icon: '\u274C', file: 'wizard-bulk-delete',    cls: 'BulkDeleteWizard' },
+      { name: 'Status Toggle',   icon: '\uD83D\uDD04', file: 'wizard-status-toggle', cls: 'StatusToggleWizard' },
+      { name: 'Bulk Assign',     icon: '\uD83D\uDC64', file: 'wizard-bulk-assign',   cls: 'BulkAssignWizard' },
+      { name: 'Deep Insert',     icon: '\uD83C\uDF33', file: 'wizard-deep-insert',   cls: 'DeepInsertWizard' },
+      { separator: true },
+      { name: 'Data Export (CMT)', icon: '\uD83D\uDCE4', file: 'cmt-export', cls: 'CmtExportWizard' },
+      { name: 'Data Import (CMT)', icon: '\uD83D\uDCE5', file: 'cmt-import', cls: 'CmtImportWizard' },
     ];
 
-    for (const tmpl of templates) {
+    for (const w of wizards) {
+      if (w.separator) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'border-top:1px solid var(--color-border-subtle); margin:4px 0;';
+        menu.appendChild(sep);
+        continue;
+      }
       const item = document.createElement('div');
       item.className = 'bulk-menu-item';
-      item.textContent = tmpl.name;
+      item.textContent = `${w.icon} ${w.name}`;
       item.addEventListener('click', () => {
-        tmpl.action();
         menu.remove();
+        this._launchWizard(w.file, w.cls);
       });
       menu.appendChild(item);
     }
@@ -1270,6 +1269,29 @@ export class BulkOperations {
       }
     };
     setTimeout(() => document.addEventListener('click', close), 0);
+  }
+
+  /**
+   * Launch a wizard by dynamically importing its module.
+   * @param {string} moduleFile - filename in bulk-ops/ (without .js)
+   * @param {string} className  - exported class name
+   */
+  async _launchWizard(moduleFile, className) {
+    try {
+      const module = await import(`./bulk-ops/${moduleFile}.js`);
+      const WizardClass = module[className] || module.default;
+      const wizard = new WizardClass(this.metadataCache, this.apiClient);
+      const operations = await wizard.show(this.container);
+      if (operations && operations.length > 0) {
+        for (const op of operations) {
+          this.addOperation(op);
+        }
+        this._showNotification(`Added ${operations.length} operation(s) from wizard.`, 'success');
+      }
+    } catch (err) {
+      this._showNotification(`Wizard error: ${err.message}`, 'error');
+      console.error('Wizard error:', err);
+    }
   }
 
   /** Template: Bulk create from JSON. Prompt user for entity and JSON array. */
@@ -1687,6 +1709,13 @@ export class BulkOperations {
       // Show retry button if any failed
       const failed = this.operations.filter(o => o.status === 'failed');
       this._retryBtn.style.display = failed.length > 0 ? '' : 'none';
+
+      // Easter egg achievements
+      import('./easter-eggs.js').then(ee => {
+        ee.unlockAchievement('first_bulk');
+        if (pending.length >= 100) ee.unlockAchievement('bulk_100');
+        ee.maybeShowClippy('bulk');
+      }).catch(() => {});
     }
   }
 

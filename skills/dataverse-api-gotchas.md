@@ -53,10 +53,17 @@ Response shape:
 ```json
 {
   "RolePrivileges": [
-    { "PrivilegeId": "...", "PrivilegeName": "prvReadAccount", "Depth": "Global" }
+    { "PrivilegeId": "guid", "Depth": "Global", "BusinessUnitId": "guid" }
   ]
 }
 ```
+
+**Note**: The response does NOT include `PrivilegeName`. To resolve names, query `privileges`
+with a `$filter` on `privilegeid`:
+```
+GET /privileges?$select=privilegeid,name&$filter=privilegeid eq <guid> or privilegeid eq <guid>
+```
+Privilege names follow the pattern `prv` + Operation + EntityName (e.g. `prvReadAccount`).
 
 `Depth` is a string — never a number. Map to access level integers:
 ```js
@@ -73,8 +80,8 @@ For all privileges a specific user holds (across direct roles + team roles):
 GET /RetrieveUserPrivileges(UserId=@p)?@p=<userGuid>
 ```
 
-Same `RolePrivileges[].PrivilegeName` / `.Depth` shape as above.
-Parse `PrivilegeName` to extract operation and entity:
+Same `RolePrivileges[].PrivilegeId` / `.Depth` shape as above (no `PrivilegeName`).
+Resolve names via `privileges` endpoint, then parse to extract operation and entity:
 - `"prvCreateAccount"` → op: `Create`, entity: `account`
 - `"prvAppendToAccount"` → op: `AppendTo`, entity: `account`
 - Match operations longest-first to avoid `Append` swallowing `AppendTo`

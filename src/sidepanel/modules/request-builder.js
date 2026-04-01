@@ -222,23 +222,41 @@ function generateCSharp(req) {
  * @returns {string}
  */
 function generatePowerAutomate(req) {
+  // Strip everything up to and including /api/data/vX.X/ to get the entity-relative path
+  let relativeUri = req.url
+    .replace(/^https?:\/\/[^/]+/, '')           // strip origin
+    .replace(/^\/api\/data\/v[\d.]+\//, '');     // strip /api/data/v9.2/
+  // If still starts with api/data (no leading slash variant), strip that too
+  relativeUri = relativeUri.replace(/^api\/data\/v[\d.]+\//, '');
+
   const action = {
     type: 'OpenApiConnection',
     inputs: {
       host: {
-        connectionName: 'shared_commondataserviceforapps',
-        operationId: 'PerformUnboundAction',
-        apiId: '/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps',
+        connectionName: 'shared_webcontents',
+        operationId: 'InvokeHttp',
+        apiId: '/providers/Microsoft.PowerApps/apis/shared_webcontents',
       },
-      method: req.method.toLowerCase(),
-      path: new URL(req.url).pathname,
-      headers: req.headers || {},
+      parameters: {
+        Uri: `api/data/v9.2/${relativeUri}`,
+        Method: req.method,
+        headers: req.headers || {},
+      },
     },
   };
   if (req.body && ['POST', 'PATCH', 'PUT'].includes(req.method)) {
-    action.inputs.body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    try {
+      action.inputs.parameters.Body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    } catch { action.inputs.parameters.Body = req.body; }
   }
-  return JSON.stringify(action, null, 2);
+
+  return [
+    '// HTTP with Microsoft Entra ID (preauthorized) connector',
+    '// Connection setup: Base URL = your org URL (e.g. https://org.crm.dynamics.com)',
+    '// Only the relative path goes in Uri — the base URL is stored in the connection.',
+    '',
+    JSON.stringify(action, null, 2),
+  ].join('\n');
 }
 
 /**
@@ -1437,14 +1455,14 @@ export class RequestBuilder {
       .filter(e => {
         const setName = e.entitySetName || e.EntitySetName || e.logicalCollectionName || '';
         const logicalName = e.logicalName || e.LogicalName || '';
-        const displayName = e.displayName || e.DisplayName || '';
+        const displayName = e.displayName || e.DisplayName?.UserLocalizedLabel?.Label || '';
         return setName.toLowerCase().includes(q) || logicalName.toLowerCase().includes(q) || displayName.toLowerCase().includes(q);
       })
       .slice(0, 50);
 
     for (const e of matches) {
       const setName = e.entitySetName || e.EntitySetName || e.logicalCollectionName || `${e.logicalName || e.LogicalName}s`;
-      const displayName = e.displayName || e.DisplayName || e.logicalName || e.LogicalName;
+      const displayName = e.displayName || e.DisplayName?.UserLocalizedLabel?.Label || e.logicalName || e.LogicalName;
       const item = document.createElement('div');
       item.className = 'rb-autocomplete-item';
       item.textContent = `${setName} (${displayName})`;

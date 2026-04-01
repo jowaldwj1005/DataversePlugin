@@ -72,7 +72,7 @@ const ATTR_TYPE_LABELS = Object.freeze({
 
 const API = {
   entityList: () =>
-    `EntityDefinitions?$select=LogicalName,DisplayName,SchemaName,EntitySetName,ObjectTypeCode,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity,IsActivity,Description&$filter=IsPrivate eq false`,
+    `EntityDefinitions?$select=LogicalName,DisplayName,SchemaName,EntitySetName,ObjectTypeCode,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity,IsActivity,Description,MetadataId&$filter=IsPrivate eq false`,
 
   entityAttributes: (logicalName) =>
     `EntityDefinitions(LogicalName='${logicalName}')/Attributes?$select=LogicalName,SchemaName,AttributeType,DisplayName,RequiredLevel,IsCustomAttribute,IsPrimaryId,IsPrimaryName,Description`,
@@ -96,12 +96,12 @@ const API = {
     `solutions?$select=friendlyname,uniquename,version,ismanaged,description`,
 
   globalCustomApis: (isFunction) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,isboundapi,boundentitylogicalname` +
-    `&$filter=isfunction eq ${isFunction} and isboundapi eq false`,
+    `customapis?$select=uniquename,displayname,description,isfunction,isboundentity,boundentitylogicalname` +
+    `&$filter=isfunction eq ${isFunction} and isboundentity eq false`,
 
   boundCustomApis: (entityLogicalName) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,isboundapi,boundentitylogicalname` +
-    `&$filter=isboundapi eq true and boundentitylogicalname eq '${entityLogicalName}'`,
+    `customapis?$select=uniquename,displayname,description,isfunction,isboundentity,boundentitylogicalname` +
+    `&$filter=isboundentity eq true and boundentitylogicalname eq '${entityLogicalName}'`,
 
   customApiParams: (uniquename) =>
     `customapirequestparameters?$select=uniquename,name,description,type,isoptional` +
@@ -602,6 +602,14 @@ class ApiExplorer {
 
     node.badge = String(entities.length);
 
+    // Easter egg: 500+ entities achievement
+    if (entities.length >= 500) {
+      import('./easter-eggs.js').then(ee => {
+        ee.unlockAchievement('explorer_500');
+        ee.maybeShowClippy('explorer');
+      }).catch(() => {});
+    }
+
     node.children = entities.map((entity) => {
       const dName = displayName(entity);
       const label = dName && dName !== entity.LogicalName
@@ -989,7 +997,7 @@ class ApiExplorer {
     return apis.map((api) => {
       const dName = api.displayname || api.uniquename;
       const isFunction = api.isfunction;
-      const isBound = api.isboundapi;
+      const isBound = api.isboundentity;
       const boundLabel = isBound ? ` (bound: ${api.boundentitylogicalname || '?'})` : '';
 
       const child = createNode({
@@ -1114,31 +1122,46 @@ class ApiExplorer {
     const rows = [];
     const filter = this._filter.toLowerCase();
 
-    const walk = (node) => {
+    const nodeMatches = (node) =>
+      fuzzyMatch(node.label, filter) ||
+      (node.data && (
+        fuzzyMatch(node.data.LogicalName || '', filter) ||
+        fuzzyMatch(displayName(node.data) || '', filter) ||
+        fuzzyMatch(node.data.EntitySetName || '', filter)
+      ));
+
+    const anyChildMatches = (node) => {
+      for (const child of node.children) {
+        if (nodeMatches(child) || anyChildMatches(child)) return true;
+      }
+      return false;
+    };
+
+    const walk = (node, forceShow) => {
       // Skip root node in display
       if (node.type === 'root') {
-        for (const child of node.children) walk(child);
+        for (const child of node.children) walk(child, false);
         return;
       }
 
-      // Apply filter: only filter entity-level nodes in the tables category
-      if (filter && node.type === 'entity') {
-        const matchLabel = fuzzyMatch(node.label, filter);
-        const matchLogical = node.data && fuzzyMatch(node.data.LogicalName, filter);
-        const matchDisplay = node.data && fuzzyMatch(displayName(node.data), filter);
-        const matchEntitySet = node.data && fuzzyMatch(node.data.EntitySetName || '', filter);
-        if (!matchLabel && !matchLogical && !matchDisplay && !matchEntitySet) return;
-      }
+      if (filter) {
+        const matches = nodeMatches(node);
+        const childrenMatch = node.children.length > 0 && anyChildMatches(node);
+        if (!forceShow && !matches && !childrenMatch) return;
 
-      rows.push(node);
-
-      if (node.expanded && node.children.length > 0) {
-        for (const child of node.children) walk(child);
+        rows.push(node);
+        // During a search, expand all levels so matches are visible
+        for (const child of node.children) walk(child, matches);
+      } else {
+        rows.push(node);
+        if (node.expanded && node.children.length > 0) {
+          for (const child of node.children) walk(child, false);
+        }
       }
     };
 
     if (this._root) {
-      for (const child of this._root.children) walk(child);
+      for (const child of this._root.children) walk(child, false);
     }
 
     this._visibleRows = rows;
@@ -1351,7 +1374,7 @@ class ApiExplorer {
   _showCustomApiDetails(api) {
     if (!api) return;
     const typeLabel = api.isfunction ? 'Function' : 'Action';
-    const bindLabel = api.isboundapi ? `Bound (${api.boundentitylogicalname || '?'})` : 'Unbound';
+    const bindLabel = api.isboundentity ? `Bound (${api.boundentitylogicalname || '?'})` : 'Unbound';
     this._detailPanel.setData({
       title: api.displayname || api.uniquename,
       raw: api,

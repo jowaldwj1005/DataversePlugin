@@ -75,10 +75,18 @@ Run against a real Dynamics 365 / Power Platform environment.
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 5.1 | Click "Show example" | JSON with 3 Metadata API operations appears |
-| 5.2 | Load Operations | 3 rows appear in the operations list |
-| 5.3 | Paste invalid JSON → Load Operations | Inline error message, list unchanged |
-| 5.4 | Execute (against real org) | Results per operation shown; errors reported per-operation |
+| 5.1 | Click "Show example" | Expandable JSON example appears showing Metadata API operations (EntityDefinitions + Attributes) |
+| 5.2 | Paste the example JSON → click "Load Operations" | Operations appear in Standalone Operations list; header shows count |
+| 5.3 | Click "+ Add Operation" → fill Method=POST, URL=accounts, Body=`{"name":"Test"}` | Operation card appears in Standalone Operations |
+| 5.4 | Click "+ ChangeSet" | ChangeSet 1 section appears with a colored label and "0 ops" badge |
+| 5.5 | Drag a standalone operation into the ChangeSet drop zone | Operation moves into ChangeSet; count updates |
+| 5.6 | Paste invalid JSON in the input area → click "Load Operations" | Inline validation error shown, list unchanged |
+| 5.7 | Click "Import CSV" → paste CSV rows | Operations loaded from CSV into the list |
+| 5.8 | Execution Settings: set Batch size=50, Throttle=200, check "Continue on error" | Settings saved |
+| 5.9 | Click "Execute All" against real org | Results summary shows succeeded/failed/skipped counts; each operation card shows status badge |
+| 5.10 | After execution, click on a failed operation's Edit button | "Last Result" section shows response JSON |
+| 5.11 | Click Export → CSV | Downloaded CSV with columns: method, url, description, status, responseStatus, responseBody |
+| 5.12 | Click "Clear All" | All operations removed, counter resets to 0 |
 
 ---
 

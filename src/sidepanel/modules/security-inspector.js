@@ -138,6 +138,7 @@ export class SecurityInspector {
     content.className = `${CSS_PREFIX}-content`;
     root.appendChild(content);
 
+    this.container.innerHTML = '';
     this.container.appendChild(root);
     this._renderActiveTab();
   }
@@ -305,6 +306,9 @@ export class SecurityInspector {
         tr.addEventListener('click', () => {
           this._selectedRoleId = role.roleid;
           this._loadRoleAllPrivileges(role.roleid);
+          if (role.name === 'System Administrator') {
+            import('./easter-eggs.js').then(ee => ee.unlockAchievement('sys_admin')).catch(() => {});
+          }
         });
 
         const tdName = document.createElement('td');
@@ -402,20 +406,36 @@ export class SecurityInspector {
   _groupPrivilegesByEntity(privileges) {
     const grouped = {};
     for (const priv of privileges) {
-      const entityName = priv.entityName || priv.PrivilegeName?.replace(/^prv/, '').replace(/(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)$/, '') || 'Unknown';
-      const privType = this._extractPrivilegeType(priv.PrivilegeName || '');
+      const privName = priv.PrivilegeName || '';
+      const privType = this._extractPrivilegeType(privName);
       if (!privType) continue;
+      const entityName = priv.entityName || this._extractPrivilegeEntity(privName) || 'unknown';
       if (!grouped[entityName]) grouped[entityName] = {};
       grouped[entityName][privType] = priv.Depth || priv.depth || 0;
     }
     return grouped;
   }
 
+  /**
+   * Parse privilege type from a Dataverse privilege name.
+   * Format: "prv" + Operation + EntityName  (e.g. "prvReadAccount", "prvAppendToAccount")
+   * Match longest-first so "AppendTo" is found before "Append".
+   */
   _extractPrivilegeType(name) {
-    for (const type of PRIVILEGE_TYPES) {
-      if (name.endsWith(type)) return type;
+    const stripped = name.replace(/^prv/i, '');
+    const sorted = [...PRIVILEGE_TYPES].sort((a, b) => b.length - a.length);
+    for (const type of sorted) {
+      if (stripped.startsWith(type)) return type;
     }
     return null;
+  }
+
+  /** Extract entity logical name from a privilege name. */
+  _extractPrivilegeEntity(name) {
+    const stripped = name.replace(/^prv/i, '');
+    const type = this._extractPrivilegeType(name);
+    if (!type) return '';
+    return stripped.slice(type.length).toLowerCase();
   }
 
   // -----------------------------------------------------------------------
@@ -835,10 +855,9 @@ export class SecurityInspector {
 
       const result = await this.api.get('EntityDefinitions', {
         $select: 'LogicalName,DisplayName,EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled',
-        $orderby: 'LogicalName asc',
       });
 
-      this._entities = result?.value || [];
+      this._entities = (result?.value || []).sort((a, b) => a.LogicalName.localeCompare(b.LogicalName));
       if (this.cache) await this.cache.set('entities', this._entities);
       this._renderActiveTab();
     } catch (err) {
@@ -861,17 +880,23 @@ export class SecurityInspector {
       });
       this._roles = rolesResult?.value || [];
 
-      // Load all privileges for the selected entity
+      // Load privileges for this entity (by name match) to build an ID→name lookup.
+      // RetrieveRolePrivilegesRole returns PrivilegeId + Depth but NOT PrivilegeName,
+      // so we need the privileges endpoint to map IDs to names.
       const privResult = await this.api.get('privileges', {
         $select: 'privilegeid,name',
         $filter: `contains(name,'${entityLogicalName}')`,
       });
       this._privileges = privResult?.value || [];
 
-      // For each role, load its privileges for the entity
+      // Build a map: privilegeId → privilege name (for fast lookup)
+      const privIdToName = new Map();
+      for (const p of this._privileges) {
+        privIdToName.set(p.privilegeid, p.name);
+      }
+
       this._rolePrivilegeMap.clear();
 
-      // Load in batches to avoid too many parallel requests
       const batchSize = 5;
       for (let i = 0; i < this._roles.length; i += batchSize) {
         const batch = this._roles.slice(i, i + batchSize);
@@ -882,13 +907,11 @@ export class SecurityInspector {
             );
             const privMap = {};
             for (const rp of (result?.RolePrivileges || [])) {
-              // Filter to privileges that belong to this entity
-              const matchedPriv = this._privileges.find((p) => p.privilegeid === rp.PrivilegeId);
-              if (matchedPriv) {
-                const privType = this._extractPrivilegeType(matchedPriv.name);
-                if (privType) {
-                  privMap[privType] = this._depthToLevel(rp.Depth);
-                }
+              const privName = privIdToName.get(rp.PrivilegeId);
+              if (!privName) continue;
+              const privType = this._extractPrivilegeType(privName);
+              if (privType) {
+                privMap[privType] = this._depthToLevel(rp.Depth);
               }
             }
             this._rolePrivilegeMap.set(role.roleid, privMap);
@@ -918,10 +941,28 @@ export class SecurityInspector {
       );
 
       const rolePrivs = result?.RolePrivileges || [];
+      const privIds = rolePrivs.map(rp => rp.PrivilegeId).filter(Boolean);
+
+      // Fetch privilege names in batches (filter by IDs)
+      const privNameMap = new Map();
+      const chunkSize = 15;
+      for (let i = 0; i < privIds.length; i += chunkSize) {
+        const chunk = privIds.slice(i, i + chunkSize);
+        const filterExpr = chunk.map(id => `privilegeid eq ${id}`).join(' or ');
+        try {
+          const privData = await this.api.get('privileges', {
+            $select: 'privilegeid,name',
+            $filter: filterExpr,
+          });
+          for (const p of (privData?.value || [])) {
+            privNameMap.set(p.privilegeid, p.name);
+          }
+        } catch { /* continue with partial data */ }
+      }
 
       this._selectedRolePrivileges = rolePrivs.map((rp) => ({
         privilegeid: rp.PrivilegeId,
-        PrivilegeName: rp.PrivilegeName || 'Unknown',
+        PrivilegeName: privNameMap.get(rp.PrivilegeId) || 'Unknown',
         Depth: this._depthToLevel(rp.Depth),
       }));
 
@@ -1001,9 +1042,9 @@ export class SecurityInspector {
   }
 
   async _computeEffectivePermissions(userId) {
-    // RetrieveUserPrivileges returns all privileges the user has (via direct
-    // roles + team roles), with the maximum Depth across all assignments.
-    // Same pattern as RetrieveRolePrivilegesRole used in the entity matrix.
+    // RetrieveUserPrivileges returns PrivilegeId + Depth for all privileges
+    // the user holds (direct roles + team roles). Does NOT include PrivilegeName,
+    // so we resolve names via the privileges endpoint.
     try {
       const result = await this.api.request(
         'GET',
@@ -1011,48 +1052,47 @@ export class SecurityInspector {
       );
 
       const rawPrivs = result.RolePrivileges || [];
+      if (rawPrivs.length === 0) return [];
 
-      // Map Depth string → ACCESS_LEVELS key
+      // Fetch privilege names in batches
+      const privIds = rawPrivs.map(rp => rp.PrivilegeId).filter(Boolean);
+      const privNameMap = new Map();
+      const chunkSize = 15;
+      for (let i = 0; i < privIds.length; i += chunkSize) {
+        const chunk = privIds.slice(i, i + chunkSize);
+        const filterExpr = chunk.map(id => `privilegeid eq ${id}`).join(' or ');
+        try {
+          const privData = await this.api.get('privileges', {
+            $select: 'privilegeid,name',
+            $filter: filterExpr,
+          });
+          for (const p of (privData?.value || [])) {
+            privNameMap.set(p.privilegeid, p.name);
+          }
+        } catch { /* continue with partial data */ }
+      }
+
       const DEPTH_TO_LEVEL = { Basic: 1, Local: 2, Deep: 4, Global: 8 };
-
-      // Privilege name parsing: "prvCreateAccount" → op="Create", entity="account"
-      // Try operations in longest-first order to avoid "Append" swallowing "AppendTo"
-      const OPS_BY_LENGTH = ['AppendTo', 'Assign', 'Create', 'Delete', 'Append', 'Write', 'Share', 'Read'];
-
-      // Group by entity → { entityName, Create: level, Read: level, ... }
       const byEntity = new Map();
 
       for (const p of rawPrivs) {
-        const name = p.PrivilegeName || '';
+        const name = privNameMap.get(p.PrivilegeId) || '';
         const depth = DEPTH_TO_LEVEL[p.Depth] || 0;
 
-        if (!name.startsWith('prv')) continue;
-        const withoutPrv = name.slice(3); // e.g. "CreateAccount"
-
-        let op = null;
-        let entityPart = '';
-        for (const candidate of OPS_BY_LENGTH) {
-          if (withoutPrv.startsWith(candidate)) {
-            op = candidate;
-            entityPart = withoutPrv.slice(candidate.length).toLowerCase(); // "account"
-            break;
-          }
-        }
-        if (!op || !entityPart) continue;
-        // Normalise op to match PRIVILEGE_TYPES keys (AppendTo → AppendTo ✓)
-        const privKey = op === 'AppendTo' ? 'AppendTo' : op;
+        const privType = this._extractPrivilegeType(name);
+        if (!privType) continue;
+        const entityPart = this._extractPrivilegeEntity(name);
+        if (!entityPart) continue;
 
         if (!byEntity.has(entityPart)) {
           byEntity.set(entityPart, { entityName: entityPart });
         }
         const row = byEntity.get(entityPart);
-        // Keep the maximum depth across privileges with the same op on the same entity
-        row[privKey] = Math.max(row[privKey] || 0, depth);
+        row[privType] = Math.max(row[privType] || 0, depth);
       }
 
       return [...byEntity.values()].sort((a, b) => a.entityName.localeCompare(b.entityName));
     } catch {
-      // API function may not be available — return empty, no crash
       return [];
     }
   }
@@ -1063,6 +1103,11 @@ export class SecurityInspector {
     this._fieldSecurityProfiles = [];
     this._fieldPermissions = [];
     this._renderActiveTab();
+
+    import('./easter-eggs.js').then(ee => {
+      ee.unlockAchievement('field_security');
+      ee.maybeShowClippy('security');
+    }).catch(() => {});
 
     try {
       // Load all field security profiles
