@@ -20,18 +20,14 @@ Every feature was designed and implemented in conversation, from the first API p
 ## Features
 
 ### API Explorer
-![alt text](image.png)
-
-![alt text](image-1.png)
 
 Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, custom APIs (actions/functions), and solutions — with full metadata details and virtual scrolling for large orgs.
+
+<img src="image.png" width="250"> <img src="image-1.png" width="250">
 
 ---
 
 ### Query Builder (FetchXML)
-
-
-
 
 Visual node-card query builder. Each table appears as a card with:
 - Checkable columns with attribute type badges
@@ -40,6 +36,8 @@ Visual node-card query builder. Each table appears as a card with:
 - "+ Add Related Table" with relationship picker (N:1 / 1:N / N:N)
 
 Switch between **FetchXML** and **OData** output. Execute and view results inline. Code generation in C#, JavaScript, and Power Automate HTTP action.
+
+<img src="image-2.png" width="250"> <img src="image-3.png" width="250"> <img src="image-4.png" width="250">
 
 ---
 
