@@ -23,7 +23,7 @@ Every feature was designed and implemented in conversation, from the first API p
 
 Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, custom APIs (actions/functions), and solutions — with full metadata details and virtual scrolling for large orgs.
 
-<img src="image.png" width="250"> <img src="image-1.png" width="250">
+<img src="image.png" width="450"> <img src="image-1.png" width="450">
 
 ---
 
@@ -37,7 +37,7 @@ Visual node-card query builder. Each table appears as a card with:
 
 Switch between **FetchXML** and **OData** output. Execute and view results inline. Code generation in C#, JavaScript, and Power Automate HTTP action.
 
-<img src="image-2.png" width="250"> <img src="image-3.png" width="250"> <img src="image-4.png" width="250">
+<img src="image-2.png" width="450"> <img src="image-3.png" width="450"> <img src="image-4.png" width="450">
 
 ---
 
