@@ -568,6 +568,7 @@ const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'Ar
 let konamiPos = 0;
 
 export function initKonamiListener() {
+  // capture:true — intercepts before child components can stopPropagation (dropdowns, lists, etc.)
   document.addEventListener('keydown', (e) => {
     if (e.key === KONAMI[konamiPos]) {
       konamiPos++;
@@ -576,7 +577,7 @@ export function initKonamiListener() {
         startMatrixRain(10000);
       }
     } else {
-      konamiPos = 0;
+      konamiPos = e.key === KONAMI[0] ? 1 : 0; // partial restart if first key matches
     }
-  });
+  }, { capture: true });
 }

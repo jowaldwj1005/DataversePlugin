@@ -7,7 +7,7 @@
  *  3. Export             (fetch records, generate XML, download)
  */
 
-import { WizardBase, EntityPickerStep, fetchAllRecords } from './wizard-base.js';
+import { WizardBase, fetchAllRecords } from './wizard-base.js';
 import { generateCmtSchemaXml, generateCmtDataXml, createZip } from './cmt-xml-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,19 @@ class ExportStep {
         this.#status = `Fetching ${ent.LogicalName} records...`;
         this.render(container);
 
-        const select = attrs.slice(0, 50).map(a => a.LogicalName).join(',');
+        // Always include primary ID + primary name; exclude virtual/composite attributes
+        const SKIP_TYPES = new Set(['Virtual', 'EntityName', 'CalendarRules', 'ManagedProperty']);
+        const exportable = attrs.filter(a =>
+          !SKIP_TYPES.has(a.AttributeType) &&
+          !a.AttributeOf  // composite child fields (e.g. _lookup_value) — not selectable
+        );
+
+        // Ensure primary fields are always present, deduplicate
+        const priorityFields = [ent.PrimaryIdAttribute, ent.PrimaryNameAttribute].filter(Boolean);
+        const rest = exportable.map(a => a.LogicalName).filter(n => !priorityFields.includes(n));
+        const selectFields = [...priorityFields, ...rest];
+
+        const select = selectFields.join(',');
         const records = await fetchAllRecords(this.#api, ent.EntitySetName, null, select, 5000);
 
         dataEntities.push({
