@@ -2110,7 +2110,7 @@ export class FetchXmlBuilder {
     const rect = anchor.getBoundingClientRect();
     const containerRect = this.container.getBoundingClientRect();
     menu.style.top = `${rect.bottom - containerRect.top}px`;
-    menu.style.left = `${rect.left - containerRect.left}px`;
+    menu.style.right = `${containerRect.right - rect.right}px`;
     this.container.style.position = 'relative';
     this.container.appendChild(menu);
 
