@@ -96,12 +96,12 @@ const API = {
     `solutions?$select=friendlyname,uniquename,version,ismanaged,description`,
 
   globalCustomApis: (isFunction) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,isboundentity,boundentitylogicalname` +
-    `&$filter=isfunction eq ${isFunction} and isboundentity eq false`,
+    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname` +
+    `&$filter=isfunction eq ${isFunction} and boundentitylogicalname eq null`,
 
   boundCustomApis: (entityLogicalName) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,isboundentity,boundentitylogicalname` +
-    `&$filter=isboundentity eq true and boundentitylogicalname eq '${entityLogicalName}'`,
+    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname` +
+    `&$filter=boundentitylogicalname eq '${entityLogicalName}'`,
 
   customApiParams: (uniquename) =>
     `customapirequestparameters?$select=uniquename,name,description,type,isoptional` +
@@ -997,8 +997,8 @@ class ApiExplorer {
     return apis.map((api) => {
       const dName = api.displayname || api.uniquename;
       const isFunction = api.isfunction;
-      const isBound = api.isboundentity;
-      const boundLabel = isBound ? ` (bound: ${api.boundentitylogicalname || '?'})` : '';
+      const isBound = !!api.boundentitylogicalname;
+      const boundLabel = isBound ? ` (bound: ${api.boundentitylogicalname})` : '';
 
       const child = createNode({
         id: `customapi-${api.uniquename}`,
@@ -1374,7 +1374,7 @@ class ApiExplorer {
   _showCustomApiDetails(api) {
     if (!api) return;
     const typeLabel = api.isfunction ? 'Function' : 'Action';
-    const bindLabel = api.isboundentity ? `Bound (${api.boundentitylogicalname || '?'})` : 'Unbound';
+    const bindLabel = api.boundentitylogicalname ? `Bound (${api.boundentitylogicalname})` : 'Unbound';
     this._detailPanel.setData({
       title: api.displayname || api.uniquename,
       raw: api,

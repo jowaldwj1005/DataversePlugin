@@ -846,19 +846,8 @@ export class SecurityInspector {
 
   async _loadEntities() {
     try {
-      const cached = this.cache ? await this.cache.get('entities') : null;
-      if (cached) {
-        this._entities = cached;
-        this._renderActiveTab();
-        return;
-      }
-
-      const result = await this.api.get('EntityDefinitions', {
-        $select: 'LogicalName,DisplayName,EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled',
-      });
-
-      this._entities = (result?.value || []).sort((a, b) => a.LogicalName.localeCompare(b.LogicalName));
-      if (this.cache) await this.cache.set('entities', this._entities);
+      const entities = this.cache ? await this.cache.getEntities() : [];
+      this._entities = entities.sort((a, b) => a.LogicalName.localeCompare(b.LogicalName));
       this._renderActiveTab();
     } catch (err) {
       this._error = `Failed to load entities: ${err.message}`;

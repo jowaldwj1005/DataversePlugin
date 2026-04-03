@@ -146,7 +146,7 @@ GET /fieldsecurityprofiles?$expand=systemuserprofiles_association($filter=system
 Unmanaged custom actions and functions registered with the Custom API framework:
 
 ```
-GET /customapis?$select=uniquename,displayname,isfunction,isboundapi,boundentitylogicalname
+GET /customapis?$select=uniquename,displayname,isfunction,boundentitylogicalname
 ```
 
 Request parameters:
@@ -159,4 +159,4 @@ Response properties:
 GET /customapiresponseproperties?$filter=customapiid/uniquename eq '<name>'&$select=uniquename,name,type
 ```
 
-Bound APIs (on an entity): `isboundapi eq true` and `boundentitylogicalname` is set.
+Bound APIs (on an entity): `boundentitylogicalname` is not null. The `isboundapi` field does NOT exist in the OData schema — use `boundentitylogicalname eq null` / `ne null` to filter instead.

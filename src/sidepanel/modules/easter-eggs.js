@@ -40,7 +40,7 @@ const CLIPPY_CHANCE = 0.15; // 15% chance on eligible triggers
 export function maybeShowClippy(trigger = 'random') {
   const now = Date.now();
   if (now - lastClippyTime < CLIPPY_COOLDOWN) return;
-  if (Math.random() > CLIPPY_CHANCE && clippyShown > 0) return;
+  if (Math.random() > CLIPPY_CHANCE) return;
 
   const eligible = CLIPPY_QUOTES.filter(q => q.trigger === trigger || q.trigger === 'random');
   if (!eligible.length) return;
@@ -161,7 +161,7 @@ export async function unlockAchievement(id) {
 
 export async function checkTimeAchievements() {
   const hour = new Date().getHours();
-  if (hour >= 0 && hour < 5) unlockAchievement('late_night');
+  if (hour >= 22 || hour < 4) unlockAchievement('late_night');
   if (hour >= 4 && hour < 6) unlockAchievement('early_bird');
 }
 
@@ -181,6 +181,15 @@ export function getAllAchievements() {
     ...ach,
     unlocked: _unlocked.has(id),
   }));
+}
+
+export async function getAllAchievementsWithStatus() {
+  await _loadAchievements();
+  return getAllAchievements();
+}
+
+export function getClippyQuotes() {
+  return CLIPPY_QUOTES.map(q => ({ trigger: q.trigger, text: q.text }));
 }
 
 function _showAchievementToast(ach) {

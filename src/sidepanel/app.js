@@ -37,6 +37,7 @@ const TAB_DEFINITIONS = Object.freeze([
   { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6' },
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12' },
   { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F' },
+  { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9' },
   { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F' },
 ]);
 
@@ -148,7 +149,7 @@ class MetadataCache {
     const response = await this._apiClient.request(
       'GET',
       `EntityDefinitions(LogicalName='${entityName}')/Attributes?$select=` +
-      'LogicalName,DisplayName,AttributeType,SchemaName,RequiredLevel,IsPrimaryId,IsPrimaryName'
+      'LogicalName,DisplayName,AttributeType,SchemaName,RequiredLevel,IsPrimaryId,IsPrimaryName,IsLogical,AttributeOf,IsValidForCreate'
     );
     const attrs = response.value || [];
     this.set(key, attrs);
@@ -561,6 +562,14 @@ class DataverseToolkit {
           break;
         }
 
+        case 'toolbuilder': {
+          const { default: ToolBuilder } = await import('./modules/tool-builder.js');
+          const module = new ToolBuilder(container, this.api, this.cache);
+          module.render();
+          this._modules[tabId] = module;
+          break;
+        }
+
         default:
           container.textContent = 'Unknown module.';
       }
@@ -628,6 +637,28 @@ class DataverseToolkit {
           <div class="${CSS_PREFIX}-shortcut"><kbd>Escape</kbd> Close modals/panels</div>
         </div>
       </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <label class="${CSS_PREFIX}-settings-label">Easter Eggs</label>
+        <div class="${CSS_PREFIX}-shortcuts-list">
+          <div class="${CSS_PREFIX}-shortcut"><kbd>↑</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd><kbd>←</kbd><kbd>→</kbd><kbd>B</kbd><kbd>A</kbd> Matrix Rain</div>
+          <div class="${CSS_PREFIX}-shortcut">Double-click <kbd>🐍</kbd> in ERD tab → Snake</div>
+        </div>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <details id="ee-achievements-details">
+          <summary class="${CSS_PREFIX}-settings-label" style="cursor:pointer; user-select:none;">Achievements <span id="ee-ach-count" style="font-weight:400;"></span></summary>
+          <div id="ee-achievements-grid" style="margin-top:8px;"></div>
+        </details>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <details>
+          <summary class="${CSS_PREFIX}-settings-label" style="cursor:pointer; user-select:none;">Clippy Quotes</summary>
+          <div id="ee-clippy-list" style="margin-top:8px;"></div>
+        </details>
+      </div>
     `;
 
     // Attach event listeners
@@ -664,6 +695,42 @@ class DataverseToolkit {
     });
 
     this._tabContent.appendChild(container);
+
+    // Lazy-load easter egg data into settings
+    import('./modules/easter-eggs.js').then(ee => {
+      // Achievements grid
+      const achGrid = container.querySelector('#ee-achievements-grid');
+      const achCount = container.querySelector('#ee-ach-count');
+      if (achGrid) {
+        ee.getAllAchievementsWithStatus().then(achievements => {
+          const unlocked = achievements.filter(a => a.unlocked).length;
+          if (achCount) achCount.textContent = `(${unlocked}/${achievements.length} unlocked)`;
+          achGrid.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:6px;';
+          for (const ach of achievements) {
+            const card = document.createElement('div');
+            card.style.cssText = `display:flex; align-items:flex-start; gap:6px; padding:6px 8px; border-radius:var(--radius-sm); border:1px solid var(--color-border-subtle); background:var(--color-bg-secondary); opacity:${ach.unlocked ? '1' : '0.35'};`;
+            card.innerHTML = `<span style="font-size:1.1rem; line-height:1;">${ach.icon}</span><div><div style="font-size:0.75rem; font-weight:600; color:var(--color-text-primary);">${ach.title}</div><div style="font-size:0.68rem; color:var(--color-text-muted); line-height:1.3;">${ach.desc}</div></div>`;
+            achGrid.appendChild(card);
+          }
+        });
+      }
+
+      // Clippy quotes list
+      const clippyList = container.querySelector('#ee-clippy-list');
+      if (clippyList) {
+        const quotes = ee.getClippyQuotes();
+        // Update the summary count
+        const summary = clippyList.closest('details')?.querySelector('summary');
+        if (summary) summary.textContent = `Clippy Quotes (${quotes.length})`;
+        clippyList.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+        for (const q of quotes) {
+          const row = document.createElement('div');
+          row.style.cssText = 'font-size:0.72rem; padding:5px 8px; border-radius:var(--radius-sm); background:var(--color-bg-secondary); border:1px solid var(--color-border-subtle); color:var(--color-text-primary); line-height:1.4; white-space:pre-line;';
+          row.innerHTML = `<span style="font-size:0.65rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--color-text-muted); margin-right:6px;">${q.trigger}</span>${q.text}`;
+          clippyList.appendChild(row);
+        }
+      }
+    }).catch(() => {});
   }
 
   // -----------------------------------------------------------------------

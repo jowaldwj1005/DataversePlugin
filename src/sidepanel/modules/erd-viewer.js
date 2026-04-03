@@ -169,6 +169,8 @@ export default class ErdViewer {
   destroy() {
     if (this._solutionName) this._saveLayout();
     if (this._keyHandler) this.container.removeEventListener('keydown', this._keyHandler);
+    if (this._exportMenuClose) document.removeEventListener('click', this._exportMenuClose);
+    if (this._fkMenuClose) document.removeEventListener('click', this._fkMenuClose);
     this.container.innerHTML = '';
   }
 
@@ -245,7 +247,8 @@ export default class ErdViewer {
       e.stopPropagation();
       exportMenu.style.display = exportMenu.style.display === 'none' ? 'flex' : 'none';
     });
-    document.addEventListener('click', () => { exportMenu.style.display = 'none'; });
+    this._exportMenuClose = () => { exportMenu.style.display = 'none'; };
+    document.addEventListener('click', this._exportMenuClose);
     exportWrap.append(exportBtn, exportMenu);
 
     // Zoom controls
@@ -377,7 +380,8 @@ export default class ErdViewer {
       e.stopPropagation();
       fkMenu.style.display = fkMenu.style.display === 'none' ? 'flex' : 'none';
     });
-    document.addEventListener('click', () => { fkMenu.style.display = 'none'; });
+    this._fkMenuClose = () => { fkMenu.style.display = 'none'; };
+    document.addEventListener('click', this._fkMenuClose);
     fkMenu.addEventListener('click', (e) => e.stopPropagation());
     fkWrap.append(fkBtn, fkMenu);
 
@@ -577,10 +581,25 @@ export default class ErdViewer {
       // Pre-load entity fields (PK + FK) for all entities
       await Promise.all(this._entities.map(ent => this._loadEntityFields(ent)));
 
-      // Clear stale layout from previous format (collapsed → expanded migration)
-      try { chrome.storage?.local?.remove(`erd_layout_${uniqueName}`); } catch { /* ok */ }
-
       this._renderERD();
+
+      // Restore saved entity positions if available
+      try {
+        const stored = await chrome.storage?.local?.get(`erd_layout_${uniqueName}`);
+        const positions = stored?.[`erd_layout_${uniqueName}`];
+        if (positions && typeof positions === 'object') {
+          let restored = false;
+          for (const ent of this._entities) {
+            const pos = positions[ent.LogicalName];
+            if (pos?.x != null && pos?.y != null) {
+              ent.x = pos.x;
+              ent.y = pos.y;
+              restored = true;
+            }
+          }
+          if (restored) this._renderERD();
+        }
+      } catch { /* ok */ }
 
       // Easter egg achievements
       import('./easter-eggs.js').then(ee => {

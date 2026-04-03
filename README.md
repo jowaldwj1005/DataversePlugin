@@ -143,6 +143,43 @@ See [CLAUDE.md](CLAUDE.md) for full architecture docs used by Claude when workin
 
 ---
 
+## Easter Eggs
+
+| Trigger | What happens |
+| ------- | ------------ |
+| `↑ ↑ ↓ ↓ ← → ← → B A` (Konami Code) | Matrix Rain — entity names fall from the sky, dangerous words (DROP, DELETE) in red |
+| Double-click `🐍` in the ERD toolbar | Snake game — eat entity boxes, their names appear in the snake body. Every 3rd entity triggers a "deleted from production" toast |
+| Various actions (15% chance) | Clippy shows up with sarcastic comments |
+| Milestones | 18 achievements, persisted across sessions (visible in Settings tab) |
+
+<details>
+<summary>All 18 achievements</summary>
+
+| Icon | Title | How to unlock |
+| ---- | ----- | ------------- |
+| 🏁 | First Steps | Execute your first query |
+| 📊 | Data Hoarder | Retrieve 100+ records in one query |
+| 🗄️ | Data Warehouse | Retrieve 1000+ records in one query |
+| 🔗 | It's Complicated | Add your first related table join |
+| 💀 | Living Dangerously | Add a N:N join |
+| 📦 | Bulk Believer | Execute your first batch operation |
+| 🚀 | Batch Boss | Execute 100+ operations in one batch |
+| 🗺️ | Cartographer | Load your first ERD diagram |
+| 🏗️ | Architect | ERD with 10+ entities |
+| 👑 | The Chosen One | View System Administrator privileges |
+| 🔐 | Fort Knox | Explore field-level security |
+| 📋 | Copy Pasta | Copy something to clipboard 10 times |
+| 🦉 | Night Owl | Use the toolkit after midnight |
+| 🐦 | Early Bird | Use the toolkit before 6 AM |
+| ⚡ | Speed Demon | Query returns in under 50ms |
+| 🔭 | Deep Space Explorer | Browse an org with 500+ entities |
+| 🐍 | Snake Charmer | Score 50+ in Snake |
+| 🕹️ | Old School | Enter the Konami Code |
+
+</details>
+
+---
+
 ## Vibe Coding
 
 This project was built entirely through iterative conversation with Claude — describing features, reviewing screenshots, adjusting behavior, and pushing the boundaries of what's possible without dependencies.

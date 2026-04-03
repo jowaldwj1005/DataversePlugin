@@ -510,9 +510,10 @@ export class EntityPickerStep {
         if (first) first.click();
       }
     });
-    document.addEventListener('click', e => {
-      if (!wrap.contains(e.target)) list.style.display = 'none';
-    }, { capture: true });
+    // Clean up previous listener if re-rendered
+    if (this._docClickHandler) document.removeEventListener('click', this._docClickHandler, { capture: true });
+    this._docClickHandler = (e) => { if (!wrap.contains(e.target)) list.style.display = 'none'; };
+    document.addEventListener('click', this._docClickHandler, { capture: true });
 
     wrap.append(input, list);
     container.append(label, wrap);

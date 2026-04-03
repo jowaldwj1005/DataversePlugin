@@ -536,14 +536,14 @@ foreach (Entity entity in results.Entities)
 }`;
 }
 
-function generateJavaScript(fetchXml, entitySetName) {
+function generateJavaScript(fetchXml, entitySetName, entityLogicalName) {
   const escaped = fetchXml.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
   return `// Using Xrm.WebApi
 const fetchXml = \`${escaped}\`;
 
 const encodedFetchXml = encodeURIComponent(fetchXml);
 
-Xrm.WebApi.retrieveMultipleRecords("${entitySetName}", \`?fetchXml=\${encodedFetchXml}\`).then(
+Xrm.WebApi.retrieveMultipleRecords("${entityLogicalName || entitySetName}", \`?fetchXml=\${encodedFetchXml}\`).then(
   function success(results) {
     console.log("Retrieved " + results.entities.length + " records");
     for (const entity of results.entities) {
@@ -1898,7 +1898,7 @@ export class FetchXmlBuilder {
         label: 'JavaScript \u2014 Xrm.WebApi',
         generate: () => {
           const ent = this._entities.find(e => e.LogicalName === this.model.entity);
-          return generateJavaScript(modelToXml(this.model), ent?.EntitySetName || `${this.model.entity}s`);
+          return generateJavaScript(modelToXml(this.model), ent?.EntitySetName || `${this.model.entity}s`, this.model.entity);
         },
       },
       {
@@ -2397,17 +2397,8 @@ export class FetchXmlBuilder {
         if (attr.name) colSet.add(attr.name);
       }
     }
-    // Add link entity aliased columns
-    for (const le of (this.model.linkEntities || [])) {
-      const prefix = le.alias || le.name;
-      if (!le.allAttributes) {
-        for (const attr of (le.attributes || [])) {
-          if (attr.name) colSet.add(`${prefix}.${attr.name}`);
-        }
-      }
-    }
-
-    // Also add any columns from actual response data (catches PK, odata fields, etc.)
+    // Add all actual response keys — this is the source of truth for column names,
+    // including link-entity aliases which Dataverse returns in its own format
     for (const rec of records) {
       for (const k of Object.keys(rec)) {
         if (!k.startsWith('@')) colSet.add(k);

@@ -127,6 +127,7 @@ All results are TTL-cached (default 1 hour). Cache is keyed per method+args.
 | **Bulk Ops** | JSON array of `{method, url, body}` pasted by user → assembled into `$batch` multipart. Not a visual batch builder. |
 | **Security** | Role matrix uses `RetrieveRolePrivilegesRole`. User permissions use `RetrieveUserPrivileges`. Field security uses direct nav prop on systemuser. |
 | **ERD** | Solution → solutioncomponents → entities. Export Schema = JSON Schema draft-07. |
+| **Tools** | Agent Tool Builder. Entity cards → JSON Schema tool definitions (Claude/OpenAI). 1:N children as deep insert array properties. Output: Tool Schema, Deep Insert template, API info. |
 | **Settings** | Persisted to `chrome.storage.local`. Theme applies immediately; no page reload needed. |
 
 ---
