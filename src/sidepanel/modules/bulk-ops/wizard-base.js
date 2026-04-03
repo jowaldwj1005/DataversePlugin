@@ -34,7 +34,7 @@ function injectStyles() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-overlay);
-  width: 92%; max-width: 560px; max-height: 85vh;
+  width: 95%; max-width: 720px; max-height: 85vh;
   display: flex; flex-direction: column;
   overflow: hidden;
 }
