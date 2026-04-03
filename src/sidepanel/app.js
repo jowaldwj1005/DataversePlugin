@@ -180,12 +180,25 @@ class MetadataCache {
     const key = `opts_${entityName}_${attrName}`;
     const cached = this.get(key);
     if (cached) return cached;
-    const response = await this._apiClient.request(
-      'GET',
-      `EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${attrName}')/` +
-      `Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$select=OptionSet`
-    );
-    const options = response.OptionSet?.Options || [];
+
+    // Try each type-cast — Picklist, State, Status have different OData types
+    const casts = [
+      'Microsoft.Dynamics.CRM.PicklistAttributeMetadata',
+      'Microsoft.Dynamics.CRM.StateAttributeMetadata',
+      'Microsoft.Dynamics.CRM.StatusAttributeMetadata',
+      'Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata',
+    ];
+    let options = [];
+    for (const cast of casts) {
+      try {
+        const response = await this._apiClient.request(
+          'GET',
+          `EntityDefinitions(LogicalName='${entityName}')/Attributes(LogicalName='${attrName}')/${cast}?$select=OptionSet`
+        );
+        options = response.OptionSet?.Options || [];
+        if (options.length) break;
+      } catch { /* wrong cast — try next */ }
+    }
     this.set(key, options);
     return options;
   }

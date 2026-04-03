@@ -468,6 +468,13 @@ export class BulkOperations {
       <span class="bulk-welcome-desc">Paste a JSON array of operations directly</span>`;
     manualCard.addEventListener('click', () => {
       this.container.innerHTML = '';
+      // Back button to return to wizard grid
+      const backBtn = document.createElement('button');
+      backBtn.className = 'bulk-back-btn';
+      backBtn.textContent = '\u2190 Back to Wizards';
+      backBtn.style.cssText = 'padding:4px 12px; font-size:0.75rem; margin:8px 12px 0; background:transparent; color:var(--color-text-muted); border:1px solid var(--color-border); border-radius:var(--radius-sm); cursor:pointer;';
+      backBtn.addEventListener('click', () => { this.container.innerHTML = ''; this._buildWelcomeGrid(); });
+      this.container.appendChild(backBtn);
       this._buildFullUI();
     });
     cards.appendChild(manualCard);

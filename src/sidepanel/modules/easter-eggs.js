@@ -403,7 +403,7 @@ export class SnakeGame {
 
     // Best-effort async record count lookup
     if (this.#apiClient && ent.entitySetName) {
-      this.#apiClient.request('GET', `${ent.entitySetName}?$count=true&$top=0`)
+      this.#apiClient.request('GET', `${ent.entitySetName}?$count=true&$top=1`)
         .then(data => { this.#foodCount = data['@odata.count'] ?? 10; })
         .catch(() => {});
     }

@@ -721,7 +721,7 @@ export class FilterStep {
     if (!this.#filter || !this.#entity) return;
     this._statusEl.innerHTML = '<span style="color:var(--color-text-muted)">Counting\u2026</span>';
     try {
-      const url = `${this.#entity.entitySetName}?$filter=${encodeURIComponent(this.#filter)}&$count=true&$top=0`;
+      const url = `${this.#entity.entitySetName}?$filter=${encodeURIComponent(this.#filter)}&$count=true&$top=1`;
       const data = await this.#api.request('GET', url);
       this.#recordCount = data['@odata.count'] ?? (data.value?.length || 0);
       this.#updateStatus();

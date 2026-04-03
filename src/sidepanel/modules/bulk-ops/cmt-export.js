@@ -67,9 +67,9 @@ class MultiEntityPickerStep {
       solBtn.disabled = true;
       try {
         const compData = await this.#api.request('GET',
-          `solutioncomponents?$filter=solutionid eq '${solId}' and componenttype eq 1&$select=objectid`);
-        const objectIds = new Set((compData.value || []).map(c => c.objectid));
-        // Match ObjectTypeCode with entities
+          `solutioncomponents?$filter=_solutionid_value eq ${solId} and componenttype eq 1&$select=objectid`);
+        const objectIds = new Set((compData.value || []).map(c => c.objectid).filter(Boolean));
+        // Match MetadataId (always present in EntityDefinitions response)
         for (const ent of this.#entities) {
           if (objectIds.has(ent.MetadataId)) {
             this.#selected.add(ent.LogicalName);
@@ -148,8 +148,6 @@ class ExportStep {
   #cache;
   #api;
   #entities = [];
-  #status = '';
-  #downloading = false;
 
   constructor(metadataCache, apiClient) {
     this.#cache = metadataCache;
@@ -183,7 +181,7 @@ class ExportStep {
       row.innerHTML = `<td style="padding:3px 6px; color:var(--color-text-primary);">${dn}</td><td style="text-align:right; padding:3px 6px; color:var(--color-text-muted);">...</td>`;
       tbody.appendChild(row);
       try {
-        const data = await this.#api.request('GET', `${ent.EntitySetName}?$count=true&$top=0`);
+        const data = await this.#api.request('GET', `${ent.EntitySetName}?$count=true&$top=1`);
         const count = data['@odata.count'] ?? 0;
         totalCount += count;
         row.children[1].textContent = count.toLocaleString();
@@ -207,32 +205,29 @@ class ExportStep {
     container.appendChild(note);
 
     const exportBtn = document.createElement('button');
-    exportBtn.textContent = this.#downloading ? 'Exporting...' : 'Export & Download';
-    exportBtn.disabled = this.#downloading;
-    exportBtn.style.cssText = `padding:8px 20px; font-size:0.85rem; font-weight:600; background:var(--color-accent-primary); color:#fff; border:1px solid var(--color-accent-primary); border-radius:var(--radius-md); cursor:pointer;${this.#downloading ? ' opacity:0.5;' : ''}`;
-    exportBtn.addEventListener('click', () => this.#doExport(container));
+    exportBtn.textContent = 'Export & Download';
+    exportBtn.style.cssText = 'padding:8px 20px; font-size:0.85rem; font-weight:600; background:var(--color-accent-primary); color:#fff; border:1px solid var(--color-accent-primary); border-radius:var(--radius-md); cursor:pointer;';
     container.appendChild(exportBtn);
 
-    if (this.#status) {
-      const statusEl = document.createElement('div');
-      statusEl.style.cssText = 'font-size:0.78rem; margin-top:10px; color:var(--color-text-primary);';
-      statusEl.textContent = this.#status;
-      container.appendChild(statusEl);
-    }
+    const statusEl = document.createElement('div');
+    statusEl.style.cssText = 'font-size:0.78rem; margin-top:10px; color:var(--color-text-primary);';
+    container.appendChild(statusEl);
+
+    exportBtn.addEventListener('click', () => this.#doExport(exportBtn, statusEl));
   }
 
-  async #doExport(container) {
-    this.#downloading = true;
-    this.#status = 'Fetching metadata...';
-    this.render(container);
+  async #doExport(exportBtn, statusEl) {
+    exportBtn.disabled = true;
+    exportBtn.textContent = 'Exporting...';
+    exportBtn.style.opacity = '0.5';
+    const setStatus = (msg) => { statusEl.textContent = msg; };
 
     try {
       const schemaEntities = [];
       const dataEntities = [];
 
       for (const ent of this.#entities) {
-        this.#status = `Fetching ${ent.LogicalName} attributes...`;
-        this.render(container);
+        setStatus(`Fetching ${ent.LogicalName} attributes...`);
 
         const attrs = await this.#cache.getAttributes(ent.LogicalName);
 
@@ -248,8 +243,7 @@ class ExportStep {
           })),
         });
 
-        this.#status = `Fetching ${ent.LogicalName} records...`;
-        this.render(container);
+        setStatus(`Fetching ${ent.LogicalName} records...`);
 
         // Always include primary ID + primary name; exclude virtual/composite attributes
         const SKIP_TYPES = new Set(['Virtual', 'EntityName', 'CalendarRules', 'ManagedProperty']);
@@ -277,15 +271,11 @@ class ExportStep {
         });
       }
 
-      this.#status = 'Generating XML...';
-      this.render(container);
-
+      setStatus('Generating XML...');
       const schemaXml = generateCmtSchemaXml(schemaEntities);
       const dataXml = generateCmtDataXml(dataEntities);
 
-      this.#status = 'Creating zip...';
-      this.render(container);
-
+      setStatus('Creating zip...');
       const blob = createZip([
         { name: 'data_schema.xml', content: schemaXml },
         { name: 'data.xml', content: dataXml },
@@ -299,12 +289,14 @@ class ExportStep {
       a.click();
       URL.revokeObjectURL(url);
 
-      this.#status = 'Export complete! File downloaded.';
+      setStatus('Export complete! File downloaded.');
+      exportBtn.textContent = 'Done';
     } catch (err) {
-      this.#status = `Export failed: ${err.message}`;
+      setStatus(`Export failed: ${err.message}`);
     } finally {
-      this.#downloading = false;
-      this.render(container);
+      exportBtn.disabled = false;
+      exportBtn.style.opacity = '1';
+      exportBtn.textContent = 'Export & Download';
     }
   }
 
