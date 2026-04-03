@@ -302,27 +302,36 @@ export function stopMatrixRain() {
 // Snake Game
 // ---------------------------------------------------------------------------
 
-const SNAKE_ENTITIES = [
+const SNAKE_ENTITIES_FALLBACK = [
   'account', 'contact', 'lead', 'opportunity', 'incident',
   'task', 'email', 'note', 'team', 'role',
   'user', 'solution', 'workflow', 'plugin', 'webresource',
   'queue', 'campaign', 'invoice', 'order', 'product',
 ];
 
-const CELL = 20;
+const CELL = 32;
 const SNAKE_SPEED = 110; // ms per tick
 
 export class SnakeGame {
   #canvas; #ctx; #width; #height;
   #cols; #rows;
   #snake; #dir; #nextDir;
-  #food; #foodLabel;
+  #food; #foodLabel; #foodCount;
   #score; #gameOver; #interval;
   #overlay; #onClose;
   #eatenEntities;
+  #entities; // array of { name, entitySetName }
+  #apiClient; // optional, for record count lookups
 
-  constructor(containerEl, onClose) {
+  /**
+   * @param {HTMLElement} containerEl
+   * @param {Function} onClose
+   * @param {{ entities?: Array<{name:string,entitySetName:string}>, apiClient?: object }} [options]
+   */
+  constructor(containerEl, onClose, options = {}) {
     this.#onClose = onClose;
+    this.#entities = options.entities?.length ? options.entities : SNAKE_ENTITIES_FALLBACK.map(n => ({ name: n, entitySetName: n + 's' }));
+    this.#apiClient = options.apiClient || null;
     this.#overlay = document.createElement('div');
     this.#overlay.className = 'ee-snake-overlay';
 
@@ -386,8 +395,18 @@ export class SnakeGame {
       x = Math.floor(Math.random() * this.#cols);
       y = Math.floor(Math.random() * this.#rows);
     } while (this.#snake.some(s => s.x === x && s.y === y));
+
+    const ent = this.#entities[Math.floor(Math.random() * this.#entities.length)];
     this.#food = { x, y };
-    this.#foodLabel = SNAKE_ENTITIES[Math.floor(Math.random() * SNAKE_ENTITIES.length)];
+    this.#foodLabel = ent.name;
+    this.#foodCount = 10; // default
+
+    // Best-effort async record count lookup
+    if (this.#apiClient && ent.entitySetName) {
+      this.#apiClient.request('GET', `${ent.entitySetName}?$count=true&$top=0`)
+        .then(data => { this.#foodCount = data['@odata.count'] ?? 10; })
+        .catch(() => {});
+    }
   }
 
   _bindKeys() {
@@ -436,18 +455,22 @@ export class SnakeGame {
 
     // Ate food?
     if (nx === this.#food.x && ny === this.#food.y) {
-      this.#score += 10;
+      const pts = Math.max(1, Math.ceil(this.#foodCount / 100));
+      this.#score += pts;
       this.#eatenEntities.push(this.#foodLabel);
       this._updateScore();
 
-      // Fake "deleted" toast on every 3rd entity
+      // Toast with record count and points
+      const countStr = this.#foodCount > 1 ? this.#foodCount.toLocaleString() : '?';
       if (this.#eatenEntities.length % 3 === 0) {
-        this._showSnakeToast(`Bonus! Table "${this.#foodLabel}" deleted from production.`);
+        this._showSnakeToast(`"${this.#foodLabel}" deleted from prod! (${countStr} records) +${pts} pts`);
+      } else {
+        this._showSnakeToast(`${this.#foodLabel} (${countStr}) +${pts} pts`);
       }
 
       this._spawnFood();
 
-      if (this.#score >= 50) unlockAchievement('snake_50');
+      if (this.#score >= 200) unlockAchievement('snake_50');
     } else {
       this.#snake.pop();
     }
@@ -477,12 +500,21 @@ export class SnakeGame {
     // Food (entity box)
     const fx = this.#food.x * CELL;
     const fy = this.#food.y * CELL;
-    ctx.fillStyle = '#569cd6';
+    ctx.fillStyle = '#3b7dd8';
     ctx.fillRect(fx + 1, fy + 1, CELL - 2, CELL - 2);
-    ctx.fillStyle = '#fff';
-    ctx.font = '7px Consolas';
+    // Border glow
+    ctx.strokeStyle = '#7bb8f5';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(fx + 1, fy + 1, CELL - 2, CELL - 2);
+    // Label with outline for contrast
+    ctx.font = 'bold 10px Consolas';
     ctx.textAlign = 'center';
-    ctx.fillText(this.#foodLabel.slice(0, 4), fx + CELL / 2, fy + CELL / 2 + 3);
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.strokeText(this.#foodLabel.slice(0, 7), fx + CELL / 2, fy + CELL / 2);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(this.#foodLabel.slice(0, 7), fx + CELL / 2, fy + CELL / 2);
 
     // Snake
     for (let i = 0; i < this.#snake.length; i++) {
@@ -494,23 +526,31 @@ export class SnakeGame {
         // Head
         ctx.fillStyle = '#4ec9b0';
         ctx.fillRect(sx + 1, sy + 1, CELL - 2, CELL - 2);
-        // Eyes
-        const eyeOffset = this.#dir.x !== 0 ? { x1: 4, y1: 5, x2: 4, y2: 13 } : { x1: 5, y1: 4, x2: 13, y2: 4 };
+        // Eyes — scaled for CELL=32
+        const hs = Math.floor(CELL * 0.15);
+        const ep = Math.floor(CELL * 0.25);
+        const eyeOffset = this.#dir.x !== 0
+          ? { x1: hs, y1: ep, x2: hs, y2: CELL - ep - 4 }
+          : { x1: ep, y1: hs, x2: CELL - ep - 4, y2: hs };
         ctx.fillStyle = '#fff';
-        ctx.fillRect(sx + eyeOffset.x1, sy + eyeOffset.y1, 3, 3);
-        ctx.fillRect(sx + eyeOffset.x2, sy + eyeOffset.y2, 3, 3);
+        ctx.fillRect(sx + eyeOffset.x1, sy + eyeOffset.y1, 4, 4);
+        ctx.fillRect(sx + eyeOffset.x2, sy + eyeOffset.y2, 4, 4);
       } else {
         // Body — show eaten entity names
-        const brightness = 1 - (i / this.#snake.length) * 0.5;
+        const brightness = 1 - (i / this.#snake.length) * 0.4;
         ctx.fillStyle = `rgba(78, 201, 176, ${brightness})`;
         ctx.fillRect(sx + 1, sy + 1, CELL - 2, CELL - 2);
 
-        if (this.#eatenEntities[this.#snake.length - 1 - i]) {
-          ctx.fillStyle = `rgba(255,255,255,${brightness * 0.8})`;
-          ctx.font = '6px Consolas';
+        const label = this.#eatenEntities[this.#snake.length - 1 - i];
+        if (label) {
+          ctx.font = 'bold 8px Consolas';
           ctx.textAlign = 'center';
-          const label = this.#eatenEntities[this.#snake.length - 1 - i];
-          ctx.fillText(label.slice(0, 3), sx + CELL / 2, sy + CELL / 2 + 2);
+          ctx.textBaseline = 'middle';
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          ctx.lineWidth = 2;
+          ctx.strokeText(label.slice(0, 6), sx + CELL / 2, sy + CELL / 2);
+          ctx.fillStyle = `rgba(255,255,255,${brightness * 0.9})`;
+          ctx.fillText(label.slice(0, 6), sx + CELL / 2, sy + CELL / 2);
         }
       }
     }

@@ -403,12 +403,77 @@ export class BulkOperations {
 
     await this._loadEntities();
 
+    // Show wizard grid when no operations, otherwise show full UI
+    if (this.operations.length === 0) {
+      this._buildWelcomeGrid();
+    } else {
+      this._buildFullUI();
+    }
+  }
+
+  /** Full editing UI with JSON panel, toolbar, operations list, etc. */
+  _buildFullUI() {
     this._buildJsonInputPanel();
     this._buildToolbar();
     this._buildOperationsList();
     this._buildConfigSection();
     this._buildProgressSection();
     this._buildResultsSection();
+  }
+
+  /** Welcome screen with wizard cards when no operations exist. */
+  _buildWelcomeGrid() {
+    const grid = document.createElement('div');
+    grid.className = 'bulk-welcome-grid';
+
+    const title = document.createElement('div');
+    title.className = 'bulk-welcome-title';
+    title.textContent = 'Bulk Operations';
+    grid.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'bulk-welcome-subtitle';
+    subtitle.textContent = 'Choose a wizard to get started, or paste JSON manually.';
+    grid.appendChild(subtitle);
+
+    const cards = document.createElement('div');
+    cards.className = 'bulk-welcome-cards';
+
+    const wizards = [
+      { name: 'Bulk Create',      icon: '\u2795', desc: 'Create multiple records from form input or CSV paste', file: 'wizard-bulk-create', cls: 'BulkCreateWizard' },
+      { name: 'Bulk Update',      icon: '\u270F\uFE0F', desc: 'Update fields on records matching an OData filter', file: 'wizard-bulk-update', cls: 'BulkUpdateWizard' },
+      { name: 'Bulk Delete',      icon: '\u274C', desc: 'Delete records with type-to-confirm safety gate', file: 'wizard-bulk-delete', cls: 'BulkDeleteWizard' },
+      { name: 'Status Toggle',    icon: '\uD83D\uDD04', desc: 'Change statecode/statuscode across matching records', file: 'wizard-status-toggle', cls: 'StatusToggleWizard' },
+      { name: 'Bulk Assign',      icon: '\uD83D\uDC64', desc: 'Reassign record ownership to a user or team', file: 'wizard-bulk-assign', cls: 'BulkAssignWizard' },
+      { name: 'Deep Insert',      icon: '\uD83C\uDF33', desc: 'Create parent + child records in a single POST', file: 'wizard-deep-insert', cls: 'DeepInsertWizard' },
+      { name: 'Data Export (CMT)', icon: '\uD83D\uDCE4', desc: 'Export records as Configuration Migration Tool zip', file: 'cmt-export', cls: 'CmtExportWizard' },
+      { name: 'Data Import (CMT)', icon: '\uD83D\uDCE5', desc: 'Import CMT zip and generate upsert/create operations', file: 'cmt-import', cls: 'CmtImportWizard' },
+    ];
+
+    for (const w of wizards) {
+      const card = document.createElement('div');
+      card.className = 'bulk-welcome-card';
+      card.innerHTML = `<span class="bulk-welcome-icon">${w.icon}</span>
+        <span class="bulk-welcome-name">${w.name}</span>
+        <span class="bulk-welcome-desc">${w.desc}</span>`;
+      card.addEventListener('click', () => this._launchWizard(w.file, w.cls));
+      cards.appendChild(card);
+    }
+
+    // Manual JSON card
+    const manualCard = document.createElement('div');
+    manualCard.className = 'bulk-welcome-card bulk-welcome-card-manual';
+    manualCard.innerHTML = `<span class="bulk-welcome-icon">{}</span>
+      <span class="bulk-welcome-name">Manual JSON</span>
+      <span class="bulk-welcome-desc">Paste a JSON array of operations directly</span>`;
+    manualCard.addEventListener('click', () => {
+      this.container.innerHTML = '';
+      this._buildFullUI();
+    });
+    cards.appendChild(manualCard);
+
+    grid.appendChild(cards);
+    this.container.appendChild(grid);
   }
 
   /** Build the primary JSON paste panel shown above the operation list. */
@@ -668,7 +733,7 @@ export class BulkOperations {
     const importJsonBtn = this._createButton('Import JSON', 'btn-outline btn-sm', () => this._importJson());
     const importCsvBtn = this._createButton('Import CSV', 'btn-outline btn-sm', () => this._importCsv());
     const pasteBtn = this._createButton('Paste Records', 'btn-outline btn-sm', () => this._pasteRecords());
-    const templateBtn = this._createButton('Templates', 'btn-outline btn-sm', () => this._showTemplateMenu(templateBtn));
+    const templateBtn = this._createButton('Wizards', 'btn-outline btn-sm', () => this._showTemplateMenu(templateBtn));
 
     const clearBtn = this._createButton('Clear All', 'btn-danger btn-sm', () => {
       if (confirm('Remove all operations?')) {
@@ -1283,8 +1348,20 @@ export class BulkOperations {
       const wizard = new WizardClass(this.metadataCache, this.apiClient);
       const operations = await wizard.show(this.container);
       if (operations && operations.length > 0) {
+        // Switch from welcome grid to full UI if needed
+        const wasEmpty = this.operations.length === 0;
         for (const op of operations) {
-          this.addOperation(op);
+          this.operations.push({
+            id: generateId(), method: op.method || 'POST', url: op.url || '',
+            body: op.body || null, headers: op.headers || {}, description: op.description || '',
+            changeSetId: op.changeSetId || null, status: 'pending', result: null,
+          });
+        }
+        if (wasEmpty) {
+          this.container.innerHTML = '';
+          this._buildFullUI();
+        } else {
+          this._renderOperationsList();
         }
         this._showNotification(`Added ${operations.length} operation(s) from wizard.`, 'success');
       }

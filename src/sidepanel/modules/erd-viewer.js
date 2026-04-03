@@ -19,6 +19,9 @@ const FIELD_PAD = 6;
 const COL_SIZE = 4;
 const H_GAP = 120;
 const V_GAP = 80;
+const CORNER_R = 6;
+const MAX_KEY_FIELDS = 15;
+const BUMP_R = 4;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -28,8 +31,18 @@ const SYSTEM_FK_FIELDS = new Set([
   'owningbusinessunit', 'owningteam', 'owninguser',
 ]);
 
+// System attributes excluded from default (collapsed) field view
+const SYSTEM_ATTR_NAMES = new Set([
+  'statecode', 'statuscode', 'createdon', 'modifiedon',
+  'createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby',
+  'owningbusinessunit', 'owningteam', 'owninguser',
+  'versionnumber', 'importsequencenumber', 'overriddencreatedon',
+  'timezoneruleversionnumber', 'utcconversiontimezonecode',
+  'organizationid', 'transactioncurrencyid',
+]);
+
 // Force layout constants
-const FR_REPULSION = 30000;
+const FR_REPULSION = 50000;
 const FR_ATTRACTION = 0.03;
 const FR_DAMPING = 0.85;
 const FR_ITERATIONS = 120;
@@ -283,7 +296,8 @@ export default class ErdViewer {
     snakeBtn.style.marginLeft = 'auto';
     snakeBtn.addEventListener('dblclick', () => {
       import('./easter-eggs.js').then(ee => {
-        new ee.SnakeGame(document.body, () => {});
+        const entities = (this._entities || []).map(e => ({ name: e.LogicalName, entitySetName: e.EntitySetName }));
+        new ee.SnakeGame(document.body, () => {}, { entities, apiClient: this._api });
       }).catch(err => console.error('Snake failed:', err));
     });
 
@@ -489,6 +503,14 @@ export default class ErdViewer {
     }));
     defs.appendChild(arrow);
 
+    // Drop shadow filter for entity cards
+    const shadow = svgEl('filter', { id: 'erd-shadow', x: '-5%', y: '-5%', width: '115%', height: '120%' });
+    shadow.appendChild(svgEl('feDropShadow', {
+      dx: '0', dy: '2', stdDeviation: '3',
+      'flood-color': '#000', 'flood-opacity': '0.12',
+    }));
+    defs.appendChild(shadow);
+
     return defs;
   }
 
@@ -680,14 +702,17 @@ export default class ErdViewer {
       const pn = attrs.find(a => a.LogicalName === ent.PrimaryNameAttribute);
       if (pn) keyFields.push(makeField(pn, false, false));
 
-      // Lookup/Owner/Customer fields → key fields
+      // All non-system fields → key fields (lookups + custom fields)
+      const keyRest = [];
       for (const attr of attrs) {
         if (attr.LogicalName === ent.PrimaryIdAttribute || attr.LogicalName === ent.PrimaryNameAttribute) continue;
+        if (SYSTEM_ATTR_NAMES.has(attr.LogicalName)) continue;
         const t = attr.AttributeType;
-        if (t === 'Lookup' || t === 'Owner' || t === 'Customer') {
-          keyFields.push(makeField(attr, false, true));
-        }
+        const isLookup = t === 'Lookup' || t === 'Owner' || t === 'Customer';
+        keyRest.push(makeField(attr, false, isLookup));
       }
+      keyRest.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      keyFields.push(...keyRest);
 
       // All fields for expanded view (PK first, then alpha by display name)
       if (pk) allFields.push(makeField(pk, true, false));
@@ -730,7 +755,17 @@ export default class ErdViewer {
 
     // Otherwise, filter out hidden system FK fields (unless expanded to show all)
     if (isExpanded) return allFields;
-    return allFields.filter(f => f.isPk || !f.isLookup || !this._hiddenSystemFKs.has(f.name));
+    const filtered = allFields.filter(f => f.isPk || !f.isLookup || !this._hiddenSystemFKs.has(f.name));
+    // Cap collapsed view to MAX_KEY_FIELDS
+    if (filtered.length > MAX_KEY_FIELDS) {
+      return filtered.slice(0, MAX_KEY_FIELDS);
+    }
+    return filtered;
+  }
+
+  _getUncappedFieldCount(entityName) {
+    const allFields = this._entityKeyFields.get(entityName) || [];
+    return allFields.filter(f => f.isPk || !f.isLookup || !this._hiddenSystemFKs.has(f.name)).length;
   }
 
   // -------------------------------------------------------------------------
@@ -854,7 +889,7 @@ export default class ErdViewer {
     }
 
     // Overlap resolution pass (use actual entity heights)
-    const boxGap = 60;
+    const boxGap = 80;
     for (let pass = 0; pass < 8; pass++) {
       let moved = false;
       for (let i = 0; i < n; i++) {
@@ -911,12 +946,15 @@ export default class ErdViewer {
       }
     }
 
-    // Compute entity sizes
+    // Compute entity sizes (add extra row if fields are capped)
     for (const ent of this._entities) {
       const fields = this._getVisibleFields(ent.LogicalName);
+      const isExpanded = this._expanded.get(ent.LogicalName) === true;
+      const uncapped = this._getUncappedFieldCount(ent.LogicalName);
+      const hasCap = !isExpanded && uncapped > fields.length;
       this._entitySizes.set(ent.LogicalName, {
         w: ENTITY_W,
-        h: entityHeight(fields.length),
+        h: entityHeight(fields.length + (hasCap ? 1 : 0)),
       });
     }
 
@@ -933,6 +971,17 @@ export default class ErdViewer {
     // Compute per-entity-side port offsets so arrows don't land at the same Y
     this._portOffsets = this._computePortOffsets();
 
+    // Build entity bounding boxes for arrow avoidance routing
+    this._entityBBoxes = [];
+    for (const ent of this._entities) {
+      if (!this._visibleEntities.has(ent.LogicalName)) continue;
+      const pos = this._positions.get(ent.LogicalName);
+      const size = this._entitySizes.get(ent.LogicalName);
+      if (pos && size) {
+        this._entityBBoxes.push({ x: pos.x, y: pos.y, w: size.w, h: size.h, name: ent.LogicalName });
+      }
+    }
+
     // Draw arrows first (behind entities)
     const arrowGroup = svgEl('g', { class: 'erd-arrows' });
     for (const rel of this._relationships) {
@@ -944,6 +993,9 @@ export default class ErdViewer {
       arrowGroup.appendChild(this._drawArrow(rel, from, to, laneOffset));
     }
     this._svgRoot.appendChild(arrowGroup);
+
+    // Add crossing bumps (horizontal lines jump over vertical lines)
+    this._addCrossingBumps(arrowGroup);
 
     // Draw entity boxes
     for (const ent of this._entities) {
@@ -989,13 +1041,16 @@ export default class ErdViewer {
     const isExpanded = this._expanded.get(ent.LogicalName) === true;
     const fields = this._getVisibleFields(ent.LogicalName);
     const allFieldCount = (this._entityAllFields.get(ent.LogicalName) || []).length;
-    const h = entityHeight(fields.length);
+    const uncappedCount = this._getUncappedFieldCount(ent.LogicalName);
+    const capped = !isExpanded && uncappedCount > fields.length;
+    const h = entityHeight(fields.length + (capped ? 1 : 0));
     this._entitySizes.set(ent.LogicalName, { w: ENTITY_W, h });
 
     const g = svgEl('g', {
       class: 'erd-entity',
       transform: `translate(${x},${y})`,
       'data-name': ent.LogicalName,
+      filter: 'url(#erd-shadow)',
     });
 
     // Background rect
@@ -1052,6 +1107,14 @@ export default class ErdViewer {
       fieldText.textContent = `${prefix}${label} (${attrTypeShort(f.type)})`;
       g.appendChild(fieldText);
     });
+
+    // "+N more" indicator when capped
+    if (capped) {
+      const moreY = HEADER_H + FIELD_PAD + fields.length * FIELD_H + 12;
+      const moreText = svgEl('text', { x: 8, y: moreY, class: 'erd-field erd-field-more' });
+      moreText.textContent = `+${uncappedCount - fields.length} more\u2026`;
+      g.appendChild(moreText);
+    }
 
     // --- Interaction handlers ---
 
@@ -1259,11 +1322,10 @@ export default class ErdViewer {
     // Path
     let d;
     if (this._routingMode === 'orthogonal') {
-      d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset);
+      d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
     } else {
       const midX = (fx + tx) / 2;
       const midY = (fy + ty) / 2;
-      // Use control points that respect exit/entry direction
       d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
     }
 
@@ -1310,6 +1372,11 @@ export default class ErdViewer {
     if (markerEnd) pathAttrs['marker-end'] = markerEnd;
 
     g.appendChild(svgEl('path', pathAttrs));
+
+    // Connection dots at endpoints
+    g.appendChild(svgEl('circle', { cx: fx, cy: fy, r: 3, class: 'erd-connection-dot' }));
+    g.appendChild(svgEl('circle', { cx: tx, cy: ty, r: 3, class: 'erd-connection-dot' }));
+
     return g;
   }
 
@@ -1408,18 +1475,218 @@ export default class ErdViewer {
   // Orthogonal edge routing (H-V-H Manhattan)
   // -------------------------------------------------------------------------
 
-  _computeOrthogonalPath(fx, fy, tx, ty, laneOffset = 0) {
-    const gap = 25;
-    // Simple 3-segment path: exit gap → mid → entry gap
+  _computeOrthogonalPath(fx, fy, tx, ty, laneOffset = 0, srcEntity = null, tgtEntity = null) {
     const midX = (fx + tx) / 2 + laneOffset;
     const midY = (fy + ty) / 2 + laneOffset;
 
-    // If mostly horizontal separation, use H-V-H
     if (Math.abs(tx - fx) > Math.abs(ty - fy)) {
-      return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
+      // H-V-H
+      const adjMidX = this._nudgeCorridor(midX, fy, ty, 'vertical', srcEntity, tgtEntity);
+      return this._roundedHVH(fx, fy, adjMidX, ty, tx);
     }
-    // If mostly vertical, use V-H-V
-    return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
+    // V-H-V
+    const adjMidY = this._nudgeCorridor(midY, fx, tx, 'horizontal', srcEntity, tgtEntity);
+    return this._roundedVHV(fx, fy, adjMidY, tx, ty);
+  }
+
+  _roundedHVH(fx, fy, midX, ty, tx) {
+    const r = CORNER_R;
+    const dx1 = midX - fx;
+    const dy = ty - fy;
+    const dx2 = tx - midX;
+    // Clamp radius to half the shortest segment
+    const rc = Math.min(r, Math.abs(dx1) / 2, Math.abs(dy) / 2, Math.abs(dx2) / 2);
+    if (rc < 1) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
+
+    const sx1 = Math.sign(dx1);
+    const sy = Math.sign(dy);
+    const sx2 = Math.sign(dx2);
+    return [
+      `M ${fx} ${fy}`,
+      `H ${midX - rc * sx1}`,
+      `Q ${midX} ${fy} ${midX} ${fy + rc * sy}`,
+      `V ${ty - rc * sy}`,
+      `Q ${midX} ${ty} ${midX + rc * sx2} ${ty}`,
+      `H ${tx}`,
+    ].join(' ');
+  }
+
+  _roundedVHV(fx, fy, midY, tx, ty) {
+    const r = CORNER_R;
+    const dy1 = midY - fy;
+    const dx = tx - fx;
+    const dy2 = ty - midY;
+    const rc = Math.min(r, Math.abs(dy1) / 2, Math.abs(dx) / 2, Math.abs(dy2) / 2);
+    if (rc < 1) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
+
+    const sy1 = Math.sign(dy1);
+    const sx = Math.sign(dx);
+    const sy2 = Math.sign(dy2);
+    return [
+      `M ${fx} ${fy}`,
+      `V ${midY - rc * sy1}`,
+      `Q ${fx} ${midY} ${fx + rc * sx} ${midY}`,
+      `H ${tx - rc * sx}`,
+      `Q ${tx} ${midY} ${tx} ${midY + rc * sy2}`,
+      `V ${ty}`,
+    ].join(' ');
+  }
+
+  // -------------------------------------------------------------------------
+  // Entity-avoidance: nudge corridor away from overlapping entity boxes
+  // -------------------------------------------------------------------------
+
+  _nudgeCorridor(coord, rangeStart, rangeEnd, direction, srcEntity, tgtEntity) {
+    if (!this._entityBBoxes?.length) return coord;
+    const margin = 14;
+    const lo = Math.min(rangeStart, rangeEnd);
+    const hi = Math.max(rangeStart, rangeEnd);
+
+    for (let pass = 0; pass < 3; pass++) {
+      let nudged = false;
+      for (const bb of this._entityBBoxes) {
+        if (bb.name === srcEntity || bb.name === tgtEntity) continue;
+        const bx1 = bb.x - margin;
+        const by1 = bb.y - margin;
+        const bx2 = bb.x + bb.w + margin;
+        const by2 = bb.y + bb.h + margin;
+
+        if (direction === 'vertical') {
+          // Corridor is a vertical line at x=coord spanning y=[lo,hi]
+          if (coord > bx1 && coord < bx2 && hi > by1 && lo < by2) {
+            // Shift to nearest edge
+            const toLeft = bx1 - margin;
+            const toRight = bx2 + margin;
+            coord = (Math.abs(coord - toLeft) < Math.abs(coord - toRight)) ? toLeft : toRight;
+            nudged = true;
+          }
+        } else {
+          // Corridor is a horizontal line at y=coord spanning x=[lo,hi]
+          if (coord > by1 && coord < by2 && hi > bx1 && lo < bx2) {
+            const toTop = by1 - margin;
+            const toBottom = by2 + margin;
+            coord = (Math.abs(coord - toTop) < Math.abs(coord - toBottom)) ? toTop : toBottom;
+            nudged = true;
+          }
+        }
+      }
+      if (!nudged) break;
+    }
+    return coord;
+  }
+
+  // -------------------------------------------------------------------------
+  // Crossing bumps: horizontal lines jump over vertical lines
+  // -------------------------------------------------------------------------
+
+  _addCrossingBumps(arrowGroup) {
+    const paths = arrowGroup.querySelectorAll('path');
+    if (paths.length < 2) return;
+
+    // Extract H and V segments from each path
+    const hSegs = []; // { y, x1, x2, pathIdx }
+    const vSegs = []; // { x, y1, y2, pathIdx }
+
+    paths.forEach((p, idx) => {
+      const d = p.getAttribute('d');
+      if (!d) return;
+      // Parse path into coordinate pairs by tracking M, H, V, L commands
+      // (ignore Q/C arcs — they're tiny corner radii)
+      const tokens = d.match(/[MHVLQC][\s\d.e+-,]*/gi);
+      if (!tokens) return;
+
+      let cx = 0, cy = 0;
+      for (const tok of tokens) {
+        const cmd = tok[0].toUpperCase();
+        const nums = tok.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+        if (cmd === 'M' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
+        else if (cmd === 'H' && nums.length >= 1) {
+          const nx = nums[0];
+          hSegs.push({ y: cy, x1: Math.min(cx, nx), x2: Math.max(cx, nx), pathIdx: idx });
+          cx = nx;
+        } else if (cmd === 'V' && nums.length >= 1) {
+          const ny = nums[0];
+          vSegs.push({ x: cx, y1: Math.min(cy, ny), y2: Math.max(cy, ny), pathIdx: idx });
+          cy = ny;
+        } else if (cmd === 'L' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
+        else if (cmd === 'Q' && nums.length >= 4) { cx = nums[2]; cy = nums[3]; }
+        else if (cmd === 'C' && nums.length >= 6) { cx = nums[4]; cy = nums[5]; }
+      }
+    });
+
+    // Find crossings: H seg intersects V seg from different paths
+    // Collect bumps per path (keyed by pathIdx)
+    const bumpsPerPath = new Map();
+
+    for (const h of hSegs) {
+      for (const v of vSegs) {
+        if (h.pathIdx === v.pathIdx) continue;
+        // Intersection: v.x within h range AND h.y within v range (with margin)
+        if (v.x > h.x1 + BUMP_R && v.x < h.x2 - BUMP_R &&
+            h.y > v.y1 + BUMP_R && h.y < v.y2 - BUMP_R) {
+          if (!bumpsPerPath.has(h.pathIdx)) bumpsPerPath.set(h.pathIdx, []);
+          bumpsPerPath.get(h.pathIdx).push({ x: v.x, y: h.y });
+        }
+      }
+    }
+
+    // For each path with bumps, rebuild its d string with arc jumps
+    for (const [pathIdx, bumps] of bumpsPerPath) {
+      const p = paths[pathIdx];
+      const d = p.getAttribute('d');
+
+      // Find H segments and insert bumps into them
+      let newD = d;
+      // Sort bumps by x so we process left to right
+      bumps.sort((a, b) => a.x - b.x);
+
+      // Replace H segments that contain bump points
+      // Strategy: parse and rebuild the path
+      const tokens = d.match(/[MHVLQC][\s\d.e+-,]*/gi);
+      if (!tokens) continue;
+
+      const parts = [];
+      let cx = 0, cy = 0;
+      for (const tok of tokens) {
+        const cmd = tok[0].toUpperCase();
+        const nums = tok.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+
+        if (cmd === 'H' && nums.length >= 1) {
+          const nx = nums[0];
+          // Find bumps on this H segment
+          const segBumps = bumps.filter(b =>
+            Math.abs(b.y - cy) < 1 &&
+            b.x > Math.min(cx, nx) + BUMP_R &&
+            b.x < Math.max(cx, nx) - BUMP_R
+          );
+          if (segBumps.length > 0) {
+            // Sort by direction of travel
+            const dir = nx > cx ? 1 : -1;
+            segBumps.sort((a, b) => (a.x - b.x) * dir);
+            let curX = cx;
+            for (const b of segBumps) {
+              parts.push(`H ${b.x - BUMP_R}`);
+              // Semicircle arc: sweep up then back down
+              parts.push(`A ${BUMP_R} ${BUMP_R} 0 0 1 ${b.x + BUMP_R} ${cy}`);
+              curX = b.x + BUMP_R;
+            }
+            parts.push(`H ${nx}`);
+          } else {
+            parts.push(tok);
+          }
+          cx = nx;
+        } else {
+          parts.push(tok);
+          if (cmd === 'M' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
+          else if (cmd === 'V' && nums.length >= 1) cy = nums[0];
+          else if (cmd === 'L' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
+          else if (cmd === 'Q' && nums.length >= 4) { cx = nums[2]; cy = nums[3]; }
+          else if (cmd === 'C' && nums.length >= 6) { cx = nums[4]; cy = nums[5]; }
+        }
+      }
+
+      p.setAttribute('d', parts.join(' '));
+    }
   }
 
   _assignLanes() {
@@ -1483,6 +1750,14 @@ export default class ErdViewer {
           };
           this._positions.set(entityName, newPos);
           g.setAttribute('transform', `translate(${newPos.x},${newPos.y})`);
+          // Update bbox for entity-avoidance during drag
+          if (this._entityBBoxes) {
+            const idx = this._entityBBoxes.findIndex(b => b.name === entityName);
+            if (idx >= 0) {
+              this._entityBBoxes[idx].x = newPos.x;
+              this._entityBBoxes[idx].y = newPos.y;
+            }
+          }
           this._redrawConnectedArrows(entityName);
           this._renderMinimap();
         });
@@ -1527,7 +1802,7 @@ export default class ErdViewer {
       let d;
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset);
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
       } else {
         const midX = (fx + tx) / 2;
         d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
@@ -1535,6 +1810,15 @@ export default class ErdViewer {
 
       const path = ag.querySelector('path');
       if (path) path.setAttribute('d', d);
+
+      // Update connection dots
+      const dots = ag.querySelectorAll('.erd-connection-dot');
+      if (dots.length === 2) {
+        dots[0].setAttribute('cx', fx);
+        dots[0].setAttribute('cy', fy);
+        dots[1].setAttribute('cx', tx);
+        dots[1].setAttribute('cy', ty);
+      }
     }
   }
 

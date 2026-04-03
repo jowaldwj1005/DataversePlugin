@@ -63,8 +63,8 @@ export default class ToolBuilder {
     // Model
     this._model = null; // { entity, entitySetName, displayName, primaryId, primaryName, attributes[], children[] }
     this._outputMode = 'tool'; // 'tool' | 'deepinsert' | 'api'
-    this._toolFormat = 'claude'; // 'claude' | 'openai'
-    this._crudMode = 'create'; // 'create' | 'update'
+    this._toolFormat = 'claude'; // 'claude' | 'openai' | 'mcp'
+    this._crudMode = 'create'; // 'create' | 'update' | 'read'
 
     // DOM refs
     this._canvas = null;
@@ -154,10 +154,10 @@ export default class ToolBuilder {
     // CRUD mode toggle
     const crudToggle = document.createElement('div');
     crudToggle.className = `${CSS}-crud-toggle`;
-    for (const mode of ['create', 'update']) {
+    for (const mode of ['create', 'update', 'read']) {
       const btn = document.createElement('button');
       btn.className = `${CSS}-crud-btn ${this._crudMode === mode ? `${CSS}-crud-active` : ''}`;
-      btn.textContent = mode === 'create' ? 'Create Tool' : 'Update Tool';
+      btn.textContent = mode === 'create' ? 'Create' : mode === 'update' ? 'Update' : 'Read';
       btn.addEventListener('click', () => {
         this._crudMode = mode;
         crudToggle.querySelectorAll(`.${CSS}-crud-btn`).forEach(b => b.classList.remove(`${CSS}-crud-active`));
@@ -584,7 +584,7 @@ export default class ToolBuilder {
     formatWrap.className = `${CSS}-format-wrap`;
     const formatSelect = document.createElement('select');
     formatSelect.className = `${CSS}-format-select`;
-    for (const [val, label] of [['claude', 'Claude / Anthropic'], ['openai', 'OpenAI Functions']]) {
+    for (const [val, label] of [['claude', 'Claude / Anthropic'], ['openai', 'OpenAI Functions'], ['mcp', 'MCP (Claude Desktop)']]) {
       const opt = document.createElement('option');
       opt.value = val;
       opt.textContent = label;
@@ -649,6 +649,10 @@ export default class ToolBuilder {
 
   _generateToolSchema() {
     const m = this._model;
+    const isRead = this._crudMode === 'read';
+
+    if (isRead) return this._generateReadToolSchema();
+
     const attrs = this._attrCache.get(m.entity) || [];
     const isUpdate = this._crudMode === 'update';
 
@@ -675,29 +679,31 @@ export default class ToolBuilder {
     }
 
     // Children as array properties (deep insert)
-    for (const child of m.children) {
-      const childAttrs = this._attrCache.get(child.entity) || [];
-      const childProps = {};
-      const childReq = [];
+    if (!isUpdate) {
+      for (const child of m.children) {
+        const childAttrs = this._attrCache.get(child.entity) || [];
+        const childProps = {};
+        const childReq = [];
 
-      for (const name of child.attributes) {
-        const attr = childAttrs.find(a => a.LogicalName === name);
-        if (!attr) continue;
-        childProps[name] = this._attrToSchemaProperty(attr, child.entity);
+        for (const name of child.attributes) {
+          const attr = childAttrs.find(a => a.LogicalName === name);
+          if (!attr) continue;
+          childProps[name] = this._attrToSchemaProperty(attr, child.entity);
 
-        const isReq = attr.RequiredLevel?.Value === 'ApplicationRequired' || attr.RequiredLevel?.Value === 'SystemRequired';
-        if (isReq) childReq.push(name);
+          const isReq = attr.RequiredLevel?.Value === 'ApplicationRequired' || attr.RequiredLevel?.Value === 'SystemRequired';
+          if (isReq) childReq.push(name);
+        }
+
+        properties[child.navProperty] = {
+          type: 'array',
+          description: `${child.displayName} records (1:N via ${child.navProperty}). Lookup to parent is set automatically via deep insert.`,
+          items: {
+            type: 'object',
+            properties: childProps,
+            ...(childReq.length ? { required: childReq } : {}),
+          },
+        };
       }
-
-      properties[child.navProperty] = {
-        type: 'array',
-        description: `${child.displayName} records (1:N via ${child.navProperty}). Lookup to parent is set automatically via deep insert.`,
-        items: {
-          type: 'object',
-          properties: childProps,
-          ...(childReq.length ? { required: childReq } : {}),
-        },
-      };
     }
 
     const inputSchema = {
@@ -709,25 +715,72 @@ export default class ToolBuilder {
     const verb = isUpdate ? 'Update' : 'Create';
     const toolName = `${verb.toLowerCase()}_${m.entity}`;
     const description = `${verb} a ${m.displayName} record in Dataverse` +
-      (m.children.length ? ` with ${m.children.map(c => c.displayName).join(', ')} child records via deep insert` : '');
+      (m.children.length && !isUpdate ? ` with ${m.children.map(c => c.displayName).join(', ')} child records via deep insert` : '');
 
-    if (this._toolFormat === 'claude') {
-      return {
-        name: toolName,
-        description,
-        input_schema: inputSchema,
-      };
-    }
+    return this._wrapToolFormat(toolName, description, inputSchema);
+  }
 
-    // OpenAI format
-    return {
-      type: 'function',
-      function: {
-        name: toolName,
-        description,
-        parameters: inputSchema,
+  _generateReadToolSchema() {
+    const m = this._model;
+    const attrs = this._attrCache.get(m.entity) || [];
+    const selectedCols = m.attributes.map(n => attrs.find(a => a.LogicalName === n)).filter(Boolean);
+
+    const properties = {
+      filter: {
+        type: 'string',
+        description: `OData $filter expression (e.g. "statecode eq 0 and name ne null"). Available columns: ${m.attributes.join(', ')}`,
+      },
+      select: {
+        type: 'string',
+        description: `Comma-separated column names to return. Available: ${m.attributes.join(', ')}`,
+      },
+      top: {
+        type: 'integer',
+        description: 'Maximum number of records to return (default 50, max 5000)',
+        default: 50,
+      },
+      orderby: {
+        type: 'string',
+        description: 'OData $orderby expression (e.g. "createdon desc")',
       },
     };
+
+    // Add entity-specific filter helpers for picklists
+    for (const attr of selectedCols) {
+      if (['Picklist', 'State', 'Status'].includes(attr.AttributeType)) {
+        const key = `${m.entity}:${attr.LogicalName}`;
+        const cached = this._optSetCache.get(key);
+        if (cached?.length) {
+          const vals = cached.map(o => `${o.Value}=${o.Label?.UserLocalizedLabel?.Label || o.Value}`).join(', ');
+          properties[`_hint_${attr.LogicalName}_values`] = {
+            type: 'string',
+            description: `Reference: ${attr.LogicalName} values: ${vals}`,
+            enum: cached.map(o => String(o.Value)),
+          };
+        }
+      }
+    }
+
+    const inputSchema = {
+      type: 'object',
+      properties,
+    };
+
+    const toolName = `list_${m.entity}`;
+    const description = `Query ${m.displayName} records from Dataverse. Returns matching records with selected columns. Use $filter for conditions, $top to limit results.`;
+
+    return this._wrapToolFormat(toolName, description, inputSchema);
+  }
+
+  _wrapToolFormat(toolName, description, inputSchema) {
+    if (this._toolFormat === 'claude') {
+      return { name: toolName, description, input_schema: inputSchema };
+    }
+    if (this._toolFormat === 'mcp') {
+      return { name: toolName, description, inputSchema };
+    }
+    // OpenAI
+    return { type: 'function', function: { name: toolName, description, parameters: inputSchema } };
   }
 
   _attrToSchemaProperty(attr, entityName) {
@@ -802,7 +855,28 @@ export default class ToolBuilder {
 
   _generateApiInfo() {
     const m = this._model;
+    const isRead = this._crudMode === 'read';
     const isUpdate = this._crudMode === 'update';
+
+    if (isRead) {
+      let info = `=== API Endpoint ===\n`;
+      info += `GET /api/data/v9.2/${m.entitySetName}\n\n`;
+      info += `=== Query Options ===\n`;
+      info += `$select=${m.attributes.join(',')}\n`;
+      info += `$filter=<your filter>\n`;
+      info += `$top=50\n`;
+      info += `$orderby=<column asc|desc>\n\n`;
+      info += `=== Headers ===\n`;
+      info += `OData-MaxVersion: 4.0\n`;
+      info += `OData-Version: 4.0\n`;
+      info += `Prefer: odata.include-annotations="*"\n\n`;
+      info += `=== Notes ===\n`;
+      info += `Response: { value: [...records], @odata.count: N }\n`;
+      info += `Add $count=true to get total record count.\n`;
+      info += `Null fields are omitted from the response.\n`;
+      return info;
+    }
+
     const method = isUpdate ? 'PATCH' : 'POST';
     const url = isUpdate
       ? `${m.entitySetName}(<${m.primaryIdAttribute}>)`

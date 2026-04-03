@@ -16,12 +16,14 @@ import { generateCmtSchemaXml, generateCmtDataXml, createZip } from './cmt-xml-u
 
 class MultiEntityPickerStep {
   #cache;
+  #api;
   #entities = [];
   #selected = new Set();
   #filter = '';
 
-  constructor(metadataCache) {
+  constructor(metadataCache, apiClient) {
     this.#cache = metadataCache;
+    this.#api = apiClient;
   }
 
   async render(container) {
@@ -36,6 +38,56 @@ class MultiEntityPickerStep {
     label.textContent = `Select entities to export (${this.#selected.size} selected)`;
     container.appendChild(label);
 
+    // Import from Solution button
+    const solRow = document.createElement('div');
+    solRow.style.cssText = 'display:flex; gap:6px; margin-bottom:6px; align-items:center;';
+
+    const solSelect = document.createElement('select');
+    solSelect.style.cssText = 'flex:1; padding:4px 8px; font-size:0.75rem; background:var(--color-bg-input); color:var(--color-text-primary); border:1px solid var(--color-border); border-radius:var(--radius-sm);';
+    solSelect.innerHTML = '<option value="">Import from Solution...</option>';
+
+    // Load solutions async
+    this.#api.request('GET', 'solutions?$select=friendlyname,uniquename,solutionid&$filter=ismanaged eq false')
+      .then(data => {
+        for (const sol of (data.value || []).sort((a, b) => a.friendlyname.localeCompare(b.friendlyname))) {
+          const opt = document.createElement('option');
+          opt.value = sol.solutionid;
+          opt.textContent = `${sol.friendlyname} (${sol.uniquename})`;
+          solSelect.appendChild(opt);
+        }
+      }).catch(() => {});
+
+    const solBtn = document.createElement('button');
+    solBtn.textContent = 'Load';
+    solBtn.style.cssText = 'padding:4px 12px; font-size:0.75rem; font-weight:600; background:var(--color-accent-primary); color:#fff; border:1px solid var(--color-accent-primary); border-radius:var(--radius-sm); cursor:pointer;';
+    solBtn.addEventListener('click', async () => {
+      const solId = solSelect.value;
+      if (!solId) return;
+      solBtn.textContent = 'Loading...';
+      solBtn.disabled = true;
+      try {
+        const compData = await this.#api.request('GET',
+          `solutioncomponents?$filter=solutionid eq '${solId}' and componenttype eq 1&$select=objectid`);
+        const objectIds = new Set((compData.value || []).map(c => c.objectid));
+        // Match ObjectTypeCode with entities
+        for (const ent of this.#entities) {
+          if (objectIds.has(ent.MetadataId)) {
+            this.#selected.add(ent.LogicalName);
+          }
+        }
+        label.textContent = `Select entities to export (${this.#selected.size} selected)`;
+        renderList();
+      } catch (err) {
+        solBtn.textContent = 'Error';
+      } finally {
+        solBtn.textContent = 'Load';
+        solBtn.disabled = false;
+      }
+    });
+
+    solRow.append(solSelect, solBtn);
+    container.appendChild(solRow);
+
     // Search
     const search = document.createElement('input');
     search.type = 'text';
@@ -49,7 +101,7 @@ class MultiEntityPickerStep {
     container.appendChild(search);
 
     const list = document.createElement('div');
-    list.style.cssText = 'max-height:280px; overflow-y:auto; border:1px solid var(--color-border-subtle); border-radius:var(--radius-sm); padding:4px;';
+    list.style.cssText = 'max-height:220px; overflow-y:auto; border:1px solid var(--color-border-subtle); border-radius:var(--radius-sm); padding:4px;';
     container.appendChild(list);
 
     const renderList = () => {
@@ -106,22 +158,52 @@ class ExportStep {
 
   setEntities(entities) { this.#entities = entities; }
 
-  render(container) {
+  async render(container) {
     container.innerHTML = '';
 
     const info = document.createElement('div');
-    info.style.cssText = 'font-size:0.82rem; color:var(--color-text-primary); margin-bottom:12px;';
+    info.style.cssText = 'font-size:0.82rem; color:var(--color-text-primary); margin-bottom:8px;';
     info.innerHTML = `Ready to export <strong>${this.#entities.length}</strong> entit${this.#entities.length !== 1 ? 'ies' : 'y'}.`;
     container.appendChild(info);
 
-    const entityList = document.createElement('div');
-    entityList.style.cssText = 'font-size:0.75rem; color:var(--color-text-muted); margin-bottom:12px;';
-    entityList.textContent = this.#entities.map(e => e.LogicalName).join(', ');
-    container.appendChild(entityList);
+    // Record count table
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%; border-collapse:collapse; font-size:0.72rem; margin-bottom:8px;';
+    table.innerHTML = '<thead><tr style="border-bottom:1px solid var(--color-border-subtle);"><th style="text-align:left; padding:3px 6px; color:var(--color-text-muted);">Entity</th><th style="text-align:right; padding:3px 6px; color:var(--color-text-muted);">Records</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    let totalCount = 0;
+    // Fetch counts in parallel (best-effort)
+    const countPromises = this.#entities.map(async ent => {
+      const row = document.createElement('tr');
+      row.style.cssText = 'border-bottom:1px solid var(--color-border-subtle);';
+      const dn = ent.DisplayName?.UserLocalizedLabel?.Label || ent.LogicalName;
+      row.innerHTML = `<td style="padding:3px 6px; color:var(--color-text-primary);">${dn}</td><td style="text-align:right; padding:3px 6px; color:var(--color-text-muted);">...</td>`;
+      tbody.appendChild(row);
+      try {
+        const data = await this.#api.request('GET', `${ent.EntitySetName}?$count=true&$top=0`);
+        const count = data['@odata.count'] ?? 0;
+        totalCount += count;
+        row.children[1].textContent = count.toLocaleString();
+        row.children[1].style.color = count > 5000 ? '#fca130' : 'var(--color-text-primary)';
+      } catch { row.children[1].textContent = '?'; }
+    });
+    await Promise.all(countPromises);
+
+    // Total + warning
+    const totalRow = document.createElement('div');
+    totalRow.style.cssText = 'font-size:0.75rem; font-weight:600; color:var(--color-text-primary); margin-bottom:8px;';
+    totalRow.textContent = `Total: ${totalCount.toLocaleString()} records`;
+    if (totalCount > 10000) {
+      totalRow.innerHTML += ' <span style="color:#fca130; font-weight:400;">— Large export, may take a moment</span>';
+    }
+    container.appendChild(totalRow);
 
     const note = document.createElement('div');
     note.style.cssText = 'font-size:0.72rem; color:var(--color-text-muted); margin-bottom:12px; line-height:1.4; background:var(--color-info-bg); border:1px solid var(--color-info-border); border-radius:var(--radius-sm); padding:8px;';
-    note.textContent = 'Click "Export" to fetch all records and download as a CMT-compatible zip (data_schema.xml + data.xml). Large exports may take a moment.';
+    note.textContent = 'Click "Export" to fetch all records and download as a CMT-compatible zip (data_schema.xml + data.xml).';
     container.appendChild(note);
 
     const exportBtn = document.createElement('button');
@@ -244,7 +326,7 @@ export class CmtExportWizard extends WizardBase {
 
   constructor(metadataCache, apiClient) {
     super(metadataCache, apiClient);
-    this.#entityStep = new MultiEntityPickerStep(metadataCache);
+    this.#entityStep = new MultiEntityPickerStep(metadataCache, apiClient);
     this.#exportStep = new ExportStep(metadataCache, apiClient);
   }
 

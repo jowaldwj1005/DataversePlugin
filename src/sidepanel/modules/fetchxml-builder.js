@@ -1166,10 +1166,7 @@ export class FetchXmlBuilder {
     this._canvas.innerHTML = '';
 
     if (!this.model.entity) {
-      const hint = document.createElement('div');
-      hint.className = 'qb-canvas-hint';
-      hint.textContent = 'Select an entity above to start building your query.';
-      this._canvas.appendChild(hint);
+      this._renderStarterTemplates();
       return;
     }
 
@@ -1185,6 +1182,130 @@ export class FetchXmlBuilder {
     addCard.innerHTML = '<div class="qb-add-card-inner">\uFF0B<br>Related<br>Table</div>';
     addCard.addEventListener('click', () => this._showRelationshipPicker(this.model));
     this._canvas.appendChild(addCard);
+  }
+
+  _renderStarterTemplates() {
+    const wrap = document.createElement('div');
+    wrap.className = 'qb-starter-wrap';
+
+    // Recent queries
+    this._loadRecentQueries().then(recent => {
+      if (!recent.length) return;
+      const recentRow = document.createElement('div');
+      recentRow.className = 'qb-recent-row';
+      const recentLabel = document.createElement('span');
+      recentLabel.className = 'qb-recent-label';
+      recentLabel.textContent = 'Recent:';
+      recentRow.appendChild(recentLabel);
+      for (const q of recent) {
+        const chip = document.createElement('button');
+        chip.className = 'qb-recent-chip';
+        const ago = this._timeAgo(q.timestamp);
+        chip.textContent = `${q.displayName || q.entity} (${ago})`;
+        chip.addEventListener('click', () => {
+          this.model = { ...q.model, linkEntities: q.model.linkEntities || [] };
+          if (this._entityInput) this._entityInput.value = q.entity;
+          this._loadAttributes(q.entity).then(() => {
+            for (const le of this.model.linkEntities) this._loadAttributes(le.name);
+            this._renderCards();
+            this._syncModelToRaw();
+          });
+        });
+        recentRow.appendChild(chip);
+      }
+      wrap.prepend(recentRow);
+    });
+
+    const title = document.createElement('div');
+    title.className = 'qb-starter-title';
+    title.textContent = 'Quick Start';
+    wrap.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'qb-starter-grid';
+
+    const templates = [
+      { icon: '\uD83C\uDFE2', name: 'Active Accounts', entity: 'account',
+        attrs: ['name', 'telephone1', 'emailaddress1', 'revenue'],
+        filter: { attribute: 'statecode', operator: 'eq', value: '0' } },
+      { icon: '\uD83D\uDC64', name: 'Contacts with Email', entity: 'contact',
+        attrs: ['fullname', 'emailaddress1', 'telephone1', 'parentcustomerid'],
+        filter: { attribute: 'emailaddress1', operator: 'not-null', value: '' } },
+      { icon: '\uD83D\uDCCB', name: 'My Open Cases', entity: 'incident',
+        attrs: ['title', 'ticketnumber', 'prioritycode', 'createdon'],
+        filter: { attribute: 'statecode', operator: 'eq', value: '0' } },
+      { icon: '\uD83D\uDCC5', name: 'Recent Activities (7d)', entity: 'activitypointer',
+        attrs: ['subject', 'activitytypecode', 'createdon', 'regardingobjectid'],
+        filter: { attribute: 'createdon', operator: 'last-x-days', value: '7' } },
+    ];
+
+    for (const t of templates) {
+      const card = document.createElement('div');
+      card.className = 'qb-starter-card';
+      card.innerHTML = `<span class="qb-starter-icon">${t.icon}</span>
+        <span class="qb-starter-name">${t.name}</span>`;
+      card.addEventListener('click', async () => {
+        this.model = createEmptyModel();
+        this.model.entity = t.entity;
+        this.model.top = 50;
+        this.model.attributes = t.attrs.map(name => ({ name }));
+        if (t.filter) {
+          this.model.filters.conditions.push(t.filter);
+        }
+        if (this._entityInput) this._entityInput.value = t.entity;
+        if (this._topInput) this._topInput.value = '50';
+        await this._loadAttributes(t.entity);
+        this._renderCards();
+        this._syncModelToRaw();
+      });
+      grid.appendChild(card);
+    }
+
+    // Custom query card
+    const customCard = document.createElement('div');
+    customCard.className = 'qb-starter-card qb-starter-card-custom';
+    customCard.innerHTML = `<span class="qb-starter-icon">\uD83D\uDD0D</span>
+      <span class="qb-starter-name">Custom Query...</span>`;
+    customCard.addEventListener('click', () => {
+      if (this._entityInput) { this._entityInput.focus(); this._entityInput.value = ''; }
+    });
+    grid.appendChild(customCard);
+
+    wrap.appendChild(grid);
+    this._canvas.appendChild(wrap);
+  }
+
+  async _loadRecentQueries() {
+    try {
+      const result = await chrome.storage.local.get('dvt_recent_queries');
+      return result.dvt_recent_queries || [];
+    } catch { return []; }
+  }
+
+  async _saveRecentQuery() {
+    if (!this.model.entity) return;
+    const ent = this._entities.find(e => e.LogicalName === this.model.entity);
+    const entry = {
+      entity: this.model.entity,
+      displayName: ent?.DisplayName?.UserLocalizedLabel?.Label || this.model.entity,
+      timestamp: Date.now(),
+      model: { ...this.model, linkEntities: (this.model.linkEntities || []).map(le => ({ ...le, _relMeta: undefined })) },
+    };
+    try {
+      const existing = await this._loadRecentQueries();
+      // Remove duplicate entity, keep max 5
+      const filtered = existing.filter(q => q.entity !== entry.entity);
+      filtered.unshift(entry);
+      await chrome.storage.local.set({ dvt_recent_queries: filtered.slice(0, 5) });
+    } catch { /* ignore */ }
+  }
+
+  _timeAgo(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
   }
 
   _renderEntityCard(entityModel, isRoot, parentModel) {
@@ -2342,6 +2463,7 @@ export class FetchXmlBuilder {
         'GET', `${ent.EntitySetName}?fetchXml=${encodeURIComponent(xml)}`
       );
       this._renderResults(response, Math.round(performance.now() - start));
+      this._saveRecentQuery();
     } catch (err) {
       this._showNotification(`Query failed: ${err.message}`, 'error');
     } finally {
