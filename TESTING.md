@@ -128,6 +128,60 @@ Run against a real Dynamics 365 / Power Platform environment.
 
 ---
 
+## Bulk Operations — Sample JSONs
+
+### Create Accounts
+
+```json
+[
+  { "method": "POST", "url": "accounts", "body": { "name": "BulkTest Alpha", "emailaddress1": "alpha@bulktest.invalid" } },
+  { "method": "POST", "url": "accounts", "body": { "name": "BulkTest Beta",  "emailaddress1": "beta@bulktest.invalid"  } },
+  { "method": "POST", "url": "accounts", "body": { "name": "BulkTest Gamma", "emailaddress1": "gamma@bulktest.invalid" } }
+]
+```
+
+Note the GUIDs from the `OData-EntityId` response headers — needed for PATCH/DELETE below.
+
+### Create Contacts
+
+```json
+[
+  { "method": "POST", "url": "contacts", "body": { "firstname": "Bulk", "lastname": "Alpha", "emailaddress1": "c.alpha@bulktest.invalid" } },
+  { "method": "POST", "url": "contacts", "body": { "firstname": "Bulk", "lastname": "Beta",  "emailaddress1": "c.beta@bulktest.invalid"  } }
+]
+```
+
+### Deactivate Accounts (replace GUIDs)
+
+```json
+[
+  { "method": "PATCH", "url": "accounts(00000000-0000-0000-0000-000000000001)", "body": { "statecode": 1, "statuscode": 2 } },
+  { "method": "PATCH", "url": "accounts(00000000-0000-0000-0000-000000000002)", "body": { "statecode": 1, "statuscode": 2 } },
+  { "method": "PATCH", "url": "accounts(00000000-0000-0000-0000-000000000003)", "body": { "statecode": 1, "statuscode": 2 } }
+]
+```
+
+### Deactivate Contacts (replace GUIDs)
+
+```json
+[
+  { "method": "PATCH", "url": "contacts(00000000-0000-0000-0000-000000000001)", "body": { "statecode": 1, "statuscode": 2 } },
+  { "method": "PATCH", "url": "contacts(00000000-0000-0000-0000-000000000002)", "body": { "statecode": 1, "statuscode": 2 } }
+]
+```
+
+### Delete cleanup
+
+```json
+[
+  { "method": "DELETE", "url": "accounts(00000000-0000-0000-0000-000000000001)", "body": null },
+  { "method": "DELETE", "url": "accounts(00000000-0000-0000-0000-000000000002)", "body": null },
+  { "method": "DELETE", "url": "contacts(00000000-0000-0000-0000-000000000001)", "body": null }
+]
+```
+
+---
+
 ## Edge cases worth testing manually
 
 - **Large org** (500+ entities): Explorer virtual scroll stays smooth, no freezing

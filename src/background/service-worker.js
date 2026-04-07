@@ -445,4 +445,4 @@ chrome.runtime.onInstalled.addListener(async () => {
   } catch { /* ignore */ }
 });
 
-console.log('[Dataverse Toolkit] Service worker initialized.');
+// Service worker initialized

@@ -11,6 +11,5 @@ chrome.devtools.panels.create(
   '/src/devtools/panel.html',
   (panel) => {
     // Panel created successfully
-    console.log('[Dataverse Toolkit] DevTools panel created.');
   }
 );

@@ -32,14 +32,20 @@ const SYSTEM_FK_FIELDS = new Set([
 ]);
 
 // System attributes excluded from default (collapsed) field view
+// System attribute base names always excluded from default (collapsed) view
 const SYSTEM_ATTR_NAMES = new Set([
   'statecode', 'statuscode', 'createdon', 'modifiedon',
   'createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby',
-  'owningbusinessunit', 'owningteam', 'owninguser',
+  'owningbusinessunit', 'owningteam', 'owninguser', 'ownerid',
   'versionnumber', 'importsequencenumber', 'overriddencreatedon',
   'timezoneruleversionnumber', 'utcconversiontimezonecode',
   'organizationid', 'transactioncurrencyid',
+  'exchangerate', 'processid', 'stageid', 'traversedpath',
+  'slaid', 'slainvokedid',
 ]);
+
+// AttributeTypes that are never useful in a diagram
+const SYSTEM_ATTR_TYPES = new Set(['Virtual', 'EntityName']);
 
 // Force layout constants
 const FR_REPULSION = 50000;
@@ -88,6 +94,32 @@ function exampleValue(attrType) {
 /** Compute entity box height based on field count. */
 function entityHeight(fieldCount) {
   return HEADER_H + FIELD_PAD + Math.max(fieldCount, 1) * FIELD_H + FIELD_PAD;
+}
+
+/**
+ * Detect auto-generated Dataverse system noise fields.
+ * @param {object} attr - attribute metadata
+ * @param {Set<string>} lookupNames - set of lookup field logical names on this entity
+ */
+function isSystemNoise(attr, lookupNames) {
+  const name = attr.LogicalName;
+  // Explicit blocklist
+  if (SYSTEM_ATTR_NAMES.has(name)) return true;
+  // Type-based exclusion (Virtual = computed/rollup, EntityName = nav metadata)
+  if (SYSTEM_ATTR_TYPES.has(attr.AttributeType)) return true;
+  // Lookup-derived display name fields: <lookupname>name, <lookupname>yominame
+  for (const suffix of ['name', 'yominame']) {
+    if (name.endsWith(suffix)) {
+      const base = name.slice(0, -suffix.length);
+      if (lookupNames.has(base) || SYSTEM_ATTR_NAMES.has(base)) return true;
+    }
+  }
+  // Polymorphic type indicator: <lookupname>type (e.g. owneridtype)
+  if (name.endsWith('type')) {
+    const base = name.slice(0, -4);
+    if (lookupNames.has(base) || lookupNames.has(base + 'id') || SYSTEM_ATTR_NAMES.has(base)) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +431,32 @@ export default class ErdViewer {
     fkMenu.addEventListener('click', (e) => e.stopPropagation());
     fkWrap.append(fkBtn, fkMenu);
 
-    bar.append(input, customLabel, sysLabel, fkWrap);
+    // Collapse All / Expand All buttons
+    const collapseAllBtn = document.createElement('button');
+    collapseAllBtn.className = 'erd-btn erd-btn-outline';
+    collapseAllBtn.textContent = 'Collapse';
+    collapseAllBtn.title = 'Collapse all entities to key fields only';
+    collapseAllBtn.addEventListener('click', () => {
+      for (const ent of this._entities) {
+        this._expanded.set(ent.LogicalName, false);
+        this._entityFieldOverrides.delete(ent.LogicalName);
+      }
+      this._renderERD(true);
+    });
+
+    const expandAllBtn = document.createElement('button');
+    expandAllBtn.className = 'erd-btn erd-btn-outline';
+    expandAllBtn.textContent = 'Expand';
+    expandAllBtn.title = 'Expand all entities to show all fields';
+    expandAllBtn.addEventListener('click', () => {
+      for (const ent of this._entities) {
+        this._expanded.set(ent.LogicalName, true);
+        this._entityFieldOverrides.delete(ent.LogicalName);
+      }
+      this._renderERD(true);
+    });
+
+    bar.append(input, customLabel, sysLabel, fkWrap, collapseAllBtn, expandAllBtn);
     this.container.appendChild(bar);
   }
 
@@ -702,11 +759,18 @@ export default class ErdViewer {
       const pn = attrs.find(a => a.LogicalName === ent.PrimaryNameAttribute);
       if (pn) keyFields.push(makeField(pn, false, false));
 
+      // Build lookup name set for derived-field detection
+      const lookupNames = new Set();
+      for (const attr of attrs) {
+        const t = attr.AttributeType;
+        if (t === 'Lookup' || t === 'Owner' || t === 'Customer') lookupNames.add(attr.LogicalName);
+      }
+
       // All non-system fields → key fields (lookups + custom fields)
       const keyRest = [];
       for (const attr of attrs) {
         if (attr.LogicalName === ent.PrimaryIdAttribute || attr.LogicalName === ent.PrimaryNameAttribute) continue;
-        if (SYSTEM_ATTR_NAMES.has(attr.LogicalName)) continue;
+        if (isSystemNoise(attr, lookupNames)) continue;
         const t = attr.AttributeType;
         const isLookup = t === 'Lookup' || t === 'Owner' || t === 'Customer';
         keyRest.push(makeField(attr, false, isLookup));
@@ -714,12 +778,14 @@ export default class ErdViewer {
       keyRest.sort((a, b) => a.displayName.localeCompare(b.displayName));
       keyFields.push(...keyRest);
 
-      // All fields for expanded view (PK first, then alpha by display name)
+      // All fields for expanded view (PK first, then alpha; exclude Virtual/EntityName)
       if (pk) allFields.push(makeField(pk, true, false));
       if (pn) allFields.push(makeField(pn, false, false));
 
       const rest = attrs
-        .filter(a => a.LogicalName !== ent.PrimaryIdAttribute && a.LogicalName !== ent.PrimaryNameAttribute)
+        .filter(a => a.LogicalName !== ent.PrimaryIdAttribute &&
+                     a.LogicalName !== ent.PrimaryNameAttribute &&
+                     !SYSTEM_ATTR_TYPES.has(a.AttributeType))
         .sort((a, b) => (a.DisplayName?.UserLocalizedLabel?.Label || a.LogicalName)
           .localeCompare(b.DisplayName?.UserLocalizedLabel?.Label || b.LogicalName));
 
@@ -971,7 +1037,7 @@ export default class ErdViewer {
     // Compute per-entity-side port offsets so arrows don't land at the same Y
     this._portOffsets = this._computePortOffsets();
 
-    // Build entity bounding boxes for arrow avoidance routing
+    // Build entity bounding boxes and waypoint graph for A* routing
     this._entityBBoxes = [];
     for (const ent of this._entities) {
       if (!this._visibleEntities.has(ent.LogicalName)) continue;
@@ -981,6 +1047,8 @@ export default class ErdViewer {
         this._entityBBoxes.push({ x: pos.x, y: pos.y, w: size.w, h: size.h, name: ent.LogicalName });
       }
     }
+    this._buildWaypointGraph();
+    this._isDragging = false;
 
     // Draw arrows first (behind entities)
     const arrowGroup = svgEl('g', { class: 'erd-arrows' });
@@ -1472,107 +1540,316 @@ export default class ErdViewer {
   }
 
   // -------------------------------------------------------------------------
-  // Orthogonal edge routing (H-V-H Manhattan)
+  // Orthogonal edge routing — A* pathfinding on entity-corner waypoints
   // -------------------------------------------------------------------------
+
+  static STUB_LEN = 15; // straight entry/exit stub length
+  static ROUTE_MARGIN = 16; // margin around entity boxes for routing
+  static BEND_PENALTY = 30; // A* cost penalty per direction change
 
   _computeOrthogonalPath(fx, fy, tx, ty, laneOffset = 0, srcEntity = null, tgtEntity = null) {
+    // During drag use fast simplified routing
+    if (this._isDragging) {
+      return this._computeSimplePath(fx, fy, tx, ty, laneOffset);
+    }
+    // Determine exit/entry directions from endpoint positions relative to entity boxes
+    const exitDir = this._getExitDirection(fx, fy, srcEntity);
+    const entryDir = this._getExitDirection(tx, ty, tgtEntity);
+
+    // Compute stubs: 15px straight out from entity before A* takes over
+    const stub = ErdViewer.STUB_LEN;
+    const sfx = fx + exitDir.dx * stub;
+    const sfy = fy + exitDir.dy * stub;
+    const stx = tx + entryDir.dx * stub;
+    const sty = ty + entryDir.dy * stub;
+
+    // Find A* path between stub endpoints
+    const astarPath = this._findOrthogonalPath(sfx, sfy, stx, sty, srcEntity, tgtEntity);
+
+    // Build full waypoints: connection point → stub → A* path → stub → connection point
+    const points = [{ x: fx, y: fy }, { x: sfx, y: sfy }];
+    // Add A* path (skip first point if it matches stub start)
+    for (let i = 0; i < astarPath.length; i++) {
+      const p = astarPath[i];
+      const last = points[points.length - 1];
+      if (Math.abs(p.x - last.x) > 0.5 || Math.abs(p.y - last.y) > 0.5) {
+        points.push(p);
+      }
+    }
+    const lastPt = points[points.length - 1];
+    if (Math.abs(stx - lastPt.x) > 0.5 || Math.abs(sty - lastPt.y) > 0.5) {
+      points.push({ x: stx, y: sty });
+    }
+    points.push({ x: tx, y: ty });
+
+    // Apply lane offset by shifting all intermediate points
+    if (laneOffset !== 0) {
+      for (let i = 1; i < points.length - 1; i++) {
+        points[i] = { x: points[i].x + laneOffset, y: points[i].y + laneOffset };
+      }
+    }
+
+    return this._waypointsToSVGPath(points);
+  }
+
+  /** Fast 3-segment path for drag mode (no A*). */
+  _computeSimplePath(fx, fy, tx, ty, laneOffset = 0) {
     const midX = (fx + tx) / 2 + laneOffset;
     const midY = (fy + ty) / 2 + laneOffset;
-
+    const r = CORNER_R;
     if (Math.abs(tx - fx) > Math.abs(ty - fy)) {
-      // H-V-H
-      const adjMidX = this._nudgeCorridor(midX, fy, ty, 'vertical', srcEntity, tgtEntity);
-      return this._roundedHVH(fx, fy, adjMidX, ty, tx);
+      const dx1 = midX - fx, dy = ty - fy, dx2 = tx - midX;
+      const rc = Math.min(r, Math.abs(dx1) / 2, Math.abs(dy) / 2, Math.abs(dx2) / 2);
+      if (rc < 1) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
+      const sx1 = Math.sign(dx1), sy = Math.sign(dy), sx2 = Math.sign(dx2);
+      return `M ${fx} ${fy} H ${midX - rc * sx1} Q ${midX} ${fy} ${midX} ${fy + rc * sy} V ${ty - rc * sy} Q ${midX} ${ty} ${midX + rc * sx2} ${ty} H ${tx}`;
     }
-    // V-H-V
-    const adjMidY = this._nudgeCorridor(midY, fx, tx, 'horizontal', srcEntity, tgtEntity);
-    return this._roundedVHV(fx, fy, adjMidY, tx, ty);
-  }
-
-  _roundedHVH(fx, fy, midX, ty, tx) {
-    const r = CORNER_R;
-    const dx1 = midX - fx;
-    const dy = ty - fy;
-    const dx2 = tx - midX;
-    // Clamp radius to half the shortest segment
-    const rc = Math.min(r, Math.abs(dx1) / 2, Math.abs(dy) / 2, Math.abs(dx2) / 2);
-    if (rc < 1) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
-
-    const sx1 = Math.sign(dx1);
-    const sy = Math.sign(dy);
-    const sx2 = Math.sign(dx2);
-    return [
-      `M ${fx} ${fy}`,
-      `H ${midX - rc * sx1}`,
-      `Q ${midX} ${fy} ${midX} ${fy + rc * sy}`,
-      `V ${ty - rc * sy}`,
-      `Q ${midX} ${ty} ${midX + rc * sx2} ${ty}`,
-      `H ${tx}`,
-    ].join(' ');
-  }
-
-  _roundedVHV(fx, fy, midY, tx, ty) {
-    const r = CORNER_R;
-    const dy1 = midY - fy;
-    const dx = tx - fx;
-    const dy2 = ty - midY;
+    const dy1 = midY - fy, dx = tx - fx, dy2 = ty - midY;
     const rc = Math.min(r, Math.abs(dy1) / 2, Math.abs(dx) / 2, Math.abs(dy2) / 2);
     if (rc < 1) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
+    const sy1 = Math.sign(dy1), sx = Math.sign(dx), sy2 = Math.sign(dy2);
+    return `M ${fx} ${fy} V ${midY - rc * sy1} Q ${fx} ${midY} ${fx + rc * sx} ${midY} H ${tx - rc * sx} Q ${tx} ${midY} ${tx} ${midY + rc * sy2} V ${ty}`;
+  }
 
-    const sy1 = Math.sign(dy1);
-    const sx = Math.sign(dx);
-    const sy2 = Math.sign(dy2);
-    return [
-      `M ${fx} ${fy}`,
-      `V ${midY - rc * sy1}`,
-      `Q ${fx} ${midY} ${fx + rc * sx} ${midY}`,
-      `H ${tx - rc * sx}`,
-      `Q ${tx} ${midY} ${tx} ${midY + rc * sy2}`,
-      `V ${ty}`,
-    ].join(' ');
+  /** Get the exit direction unit vector for a connection point on an entity. */
+  _getExitDirection(px, py, entityName) {
+    if (!entityName) return { dx: 0, dy: 0 };
+    const pos = this._positions.get(entityName);
+    const size = this._entitySizes.get(entityName);
+    if (!pos || !size) return { dx: 0, dy: 0 };
+    const eps = 2;
+    if (Math.abs(px - pos.x) < eps) return { dx: -1, dy: 0 };               // left edge
+    if (Math.abs(px - (pos.x + size.w)) < eps) return { dx: 1, dy: 0 };     // right edge
+    if (Math.abs(py - pos.y) < eps) return { dx: 0, dy: -1 };               // top edge
+    if (Math.abs(py - (pos.y + size.h)) < eps) return { dx: 0, dy: 1 };     // bottom edge
+    return { dx: Math.sign(px - (pos.x + size.w / 2)), dy: 0 };
   }
 
   // -------------------------------------------------------------------------
-  // Entity-avoidance: nudge corridor away from overlapping entity boxes
+  // Waypoint graph + A* pathfinder
   // -------------------------------------------------------------------------
 
-  _nudgeCorridor(coord, rangeStart, rangeEnd, direction, srcEntity, tgtEntity) {
-    if (!this._entityBBoxes?.length) return coord;
-    const margin = 14;
-    const lo = Math.min(rangeStart, rangeEnd);
-    const hi = Math.max(rangeStart, rangeEnd);
+  _buildWaypointGraph() {
+    const margin = ErdViewer.ROUTE_MARGIN;
+    this._routeObstacles = [];
+    this._routeWaypoints = [];
 
-    for (let pass = 0; pass < 3; pass++) {
-      let nudged = false;
-      for (const bb of this._entityBBoxes) {
-        if (bb.name === srcEntity || bb.name === tgtEntity) continue;
-        const bx1 = bb.x - margin;
-        const by1 = bb.y - margin;
-        const bx2 = bb.x + bb.w + margin;
-        const by2 = bb.y + bb.h + margin;
+    for (const bb of this._entityBBoxes) {
+      const x1 = bb.x - margin;
+      const y1 = bb.y - margin;
+      const x2 = bb.x + bb.w + margin;
+      const y2 = bb.y + bb.h + margin;
+      this._routeObstacles.push({ x1, y1, x2, y2, name: bb.name });
+      this._routeWaypoints.push({ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 });
+    }
+  }
 
-        if (direction === 'vertical') {
-          // Corridor is a vertical line at x=coord spanning y=[lo,hi]
-          if (coord > bx1 && coord < bx2 && hi > by1 && lo < by2) {
-            // Shift to nearest edge
-            const toLeft = bx1 - margin;
-            const toRight = bx2 + margin;
-            coord = (Math.abs(coord - toLeft) < Math.abs(coord - toRight)) ? toLeft : toRight;
-            nudged = true;
-          }
-        } else {
-          // Corridor is a horizontal line at y=coord spanning x=[lo,hi]
-          if (coord > by1 && coord < by2 && hi > bx1 && lo < bx2) {
-            const toTop = by1 - margin;
-            const toBottom = by2 + margin;
-            coord = (Math.abs(coord - toTop) < Math.abs(coord - toBottom)) ? toTop : toBottom;
-            nudged = true;
-          }
+  /** Test if an axis-aligned segment intersects any obstacle (excluding named entities). */
+  _segmentHitsObstacle(sx, sy, ex, ey, excludeNames) {
+    for (const obs of this._routeObstacles) {
+      if (excludeNames.has(obs.name)) continue;
+      if (sx === ex) {
+        // Vertical segment
+        const minY = Math.min(sy, ey), maxY = Math.max(sy, ey);
+        if (sx > obs.x1 && sx < obs.x2 && maxY > obs.y1 && minY < obs.y2) return true;
+      } else {
+        // Horizontal segment
+        const minX = Math.min(sx, ex), maxX = Math.max(sx, ex);
+        if (sy > obs.y1 && sy < obs.y2 && maxX > obs.x1 && minX < obs.x2) return true;
+      }
+    }
+    return false;
+  }
+
+  /** A* orthogonal pathfinder between two points, avoiding all entity boxes. */
+  _findOrthogonalPath(fx, fy, tx, ty, srcEntity, tgtEntity) {
+    const excludeNames = new Set();
+    if (srcEntity) excludeNames.add(srcEntity);
+    if (tgtEntity) excludeNames.add(tgtEntity);
+
+    // Quick check: can we go direct (single H or V)?
+    if (Math.abs(fy - ty) < 1 && !this._segmentHitsObstacle(fx, fy, tx, ty, excludeNames)) {
+      return [{ x: fx, y: fy }, { x: tx, y: ty }];
+    }
+    if (Math.abs(fx - tx) < 1 && !this._segmentHitsObstacle(fx, fy, tx, ty, excludeNames)) {
+      return [{ x: fx, y: fy }, { x: tx, y: ty }];
+    }
+
+    // Build node list: source + target + all waypoints
+    const nodes = [{ x: fx, y: fy }];
+    for (const wp of this._routeWaypoints) nodes.push(wp);
+    nodes.push({ x: tx, y: ty });
+
+    const srcIdx = 0;
+    const tgtIdx = nodes.length - 1;
+    const n = nodes.length;
+
+    // Check if two nodes can be connected with 1 or 2 axis-aligned segments
+    const canReach = (ai, bi) => {
+      const a = nodes[ai], b = nodes[bi];
+      // Direct H
+      if (Math.abs(a.y - b.y) < 1 && !this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames)) return true;
+      // Direct V
+      if (Math.abs(a.x - b.x) < 1 && !this._segmentHitsObstacle(a.x, a.y, a.x, b.y, excludeNames)) return true;
+      // L-path: H then V
+      if (!this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames) &&
+          !this._segmentHitsObstacle(b.x, a.y, b.x, b.y, excludeNames)) return true;
+      // L-path: V then H
+      if (!this._segmentHitsObstacle(a.x, a.y, a.x, b.y, excludeNames) &&
+          !this._segmentHitsObstacle(a.x, b.y, b.x, b.y, excludeNames)) return true;
+      return false;
+    };
+
+    // Direction of approach for bend detection
+    const getDir = (a, b) => {
+      if (Math.abs(b.x - a.x) > Math.abs(b.y - a.y)) return 'H';
+      return 'V';
+    };
+
+    // A* with Manhattan distance heuristic
+    const dist = new Float64Array(n).fill(Infinity);
+    const prev = new Int32Array(n).fill(-1);
+    const closed = new Uint8Array(n);
+    dist[srcIdx] = 0;
+
+    // Simple priority queue (binary heap would be better but N is small)
+    const open = [{ idx: srcIdx, f: 0 }];
+
+    const manhattan = (i) => Math.abs(nodes[i].x - tx) + Math.abs(nodes[i].y - ty);
+
+    while (open.length > 0) {
+      // Find min-f in open set
+      let bestPos = 0;
+      for (let i = 1; i < open.length; i++) {
+        if (open[i].f < open[bestPos].f) bestPos = i;
+      }
+      const cur = open[bestPos];
+      open[bestPos] = open[open.length - 1];
+      open.pop();
+
+      if (cur.idx === tgtIdx) break;
+      if (closed[cur.idx]) continue;
+      closed[cur.idx] = 1;
+
+      for (let ni = 0; ni < n; ni++) {
+        if (ni === cur.idx || closed[ni]) continue;
+        if (!canReach(cur.idx, ni)) continue;
+
+        const a = nodes[cur.idx], b = nodes[ni];
+        let cost = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+        // Bend penalty
+        if (prev[cur.idx] >= 0) {
+          const prevDir = getDir(nodes[prev[cur.idx]], a);
+          const curDir = getDir(a, b);
+          if (prevDir !== curDir) cost += ErdViewer.BEND_PENALTY;
+        }
+
+        const newDist = dist[cur.idx] + cost;
+        if (newDist < dist[ni]) {
+          dist[ni] = newDist;
+          prev[ni] = cur.idx;
+          open.push({ idx: ni, f: newDist + manhattan(ni) });
         }
       }
-      if (!nudged) break;
     }
-    return coord;
+
+    // Reconstruct path
+    if (prev[tgtIdx] === -1 && srcIdx !== tgtIdx) {
+      // No path found — fallback to direct line
+      return [{ x: fx, y: fy }, { x: tx, y: ty }];
+    }
+
+    const path = [];
+    let ci = tgtIdx;
+    while (ci >= 0) {
+      path.unshift(nodes[ci]);
+      ci = prev[ci];
+    }
+
+    // Expand L-shaped connections into orthogonal waypoints
+    const expanded = [path[0]];
+    for (let i = 1; i < path.length; i++) {
+      const a = expanded[expanded.length - 1];
+      const b = path[i];
+      if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) {
+        // Not axis-aligned → insert a corner point (H then V, or V then H)
+        if (!this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames) &&
+            !this._segmentHitsObstacle(b.x, a.y, b.x, b.y, excludeNames)) {
+          expanded.push({ x: b.x, y: a.y });
+        } else {
+          expanded.push({ x: a.x, y: b.y });
+        }
+      }
+      expanded.push(b);
+    }
+
+    return expanded;
+  }
+
+  /** Convert waypoint array to SVG path with rounded corners. */
+  _waypointsToSVGPath(points) {
+    if (points.length < 2) return '';
+    if (points.length === 2) {
+      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    }
+
+    const parts = [`M ${points[0].x} ${points[0].y}`];
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      // Direction from prev to curr
+      const dx1 = curr.x - prev.x, dy1 = curr.y - prev.y;
+      // Direction from curr to next
+      const dx2 = next.x - curr.x, dy2 = next.y - curr.y;
+
+      // If collinear, skip corner (just continue the segment)
+      if ((dx1 === 0 && dx2 === 0) || (dy1 === 0 && dy2 === 0)) {
+        // Extend to this point inline (the next segment handles continuation)
+        if (dx1 !== 0 || dy1 !== 0) {
+          if (dy1 === 0) parts.push(`H ${curr.x}`);
+          else parts.push(`V ${curr.y}`);
+        }
+        continue;
+      }
+
+      // Rounded corner
+      const segLen1 = Math.abs(dx1) + Math.abs(dy1);
+      const segLen2 = Math.abs(dx2) + Math.abs(dy2);
+      const rc = Math.min(CORNER_R, segLen1 / 2, segLen2 / 2);
+
+      if (rc < 1) {
+        // Too small for a curve
+        if (dy1 === 0) parts.push(`H ${curr.x}`);
+        else parts.push(`V ${curr.y}`);
+        continue;
+      }
+
+      const sdx1 = Math.sign(dx1) || 0, sdy1 = Math.sign(dy1) || 0;
+      const sdx2 = Math.sign(dx2) || 0, sdy2 = Math.sign(dy2) || 0;
+
+      // Approach point (rc before the corner)
+      const ax = curr.x - sdx1 * rc * (dy1 === 0 ? 1 : 0) - sdy1 * 0;
+      const ay = curr.y - sdy1 * rc * (dx1 === 0 ? 1 : 0) - sdx1 * 0;
+      // Departure point (rc after the corner)
+      const dpx = curr.x + sdx2 * rc * (dy2 === 0 ? 1 : 0);
+      const dpy = curr.y + sdy2 * rc * (dx2 === 0 ? 1 : 0);
+
+      if (dy1 === 0) parts.push(`H ${ax}`);
+      else parts.push(`V ${ay}`);
+
+      parts.push(`Q ${curr.x} ${curr.y} ${dpx} ${dpy}`);
+    }
+
+    // Final segment to last point
+    const last = points[points.length - 1];
+    const penult = points[points.length - 2];
+    if (Math.abs(last.y - penult.y) < 1) parts.push(`H ${last.x}`);
+    else parts.push(`V ${last.y}`);
+
+    return parts.join(' ');
   }
 
   // -------------------------------------------------------------------------
@@ -1691,30 +1968,32 @@ export default class ErdViewer {
 
   _assignLanes() {
     const lanes = new Map();
-    // Group relationships by approximate midpoint corridor
-    const corridors = new Map();
+    // Group relationships by entity pair + connection side for tighter bundling
+    const groups = new Map();
 
     for (const rel of this._relationships) {
       const from = this._positions.get(rel.sourceEntity);
       const to = this._positions.get(rel.targetEntity);
       if (!from || !to) continue;
+      if (!this._visibleEntities.has(rel.sourceEntity) || !this._visibleEntities.has(rel.targetEntity)) continue;
 
-      // Bucket by midpoint of the connection (rounded)
-      const midX = Math.round(((from.x + to.x) / 2) / 40) * 40;
-      const midY = Math.round(((from.y + to.y) / 2) / 40) * 40;
-      const key = `${midX},${midY}`;
-      if (!corridors.has(key)) corridors.set(key, []);
-      corridors.get(key).push(rel.schemaName);
+      const fromSize = this._entitySizes.get(rel.sourceEntity) || { w: ENTITY_W, h: 60 };
+      const toSize = this._entitySizes.get(rel.targetEntity) || { w: ENTITY_W, h: 60 };
+      const fromSide = this._getSide(from, fromSize, to);
+      const toSide = this._getSide(to, toSize, from);
+      const key = `${rel.sourceEntity}:${fromSide}:${rel.targetEntity}:${toSide}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(rel.schemaName);
     }
 
-    for (const group of corridors.values()) {
+    for (const group of groups.values()) {
       if (group.length <= 1) {
         lanes.set(group[0], 0);
         continue;
       }
       const half = (group.length - 1) / 2;
       group.forEach((name, i) => {
-        lanes.set(name, (i - half) * 8);
+        lanes.set(name, (i - half) * 6);
       });
     }
 
@@ -1731,6 +2010,7 @@ export default class ErdViewer {
       e.stopPropagation(); // prevent pan
 
       this._dragTarget = entityName;
+      this._isDragging = true;
       this._dragStart = { x: e.clientX, y: e.clientY };
       const pos = this._positions.get(entityName);
       this._entityPosAtDragStart = { x: pos.x, y: pos.y };
@@ -1765,10 +2045,14 @@ export default class ErdViewer {
 
       const onUp = () => {
         this._dragTarget = null;
+        this._isDragging = false;
         g.classList.remove('erd-dragging');
         g.removeEventListener('pointermove', onMove);
         g.removeEventListener('pointerup', onUp);
         g.removeEventListener('pointercancel', onUp);
+        // Rebuild waypoint graph and reroute all arrows with full A*
+        this._buildWaypointGraph();
+        this._rerouteAllArrows();
         if (this._solutionName) this._saveLayout();
       };
 
@@ -1820,6 +2104,47 @@ export default class ErdViewer {
         dots[1].setAttribute('cy', ty);
       }
     }
+  }
+
+  /** Reroute all arrows with full A* (called after drag ends). */
+  _rerouteAllArrows() {
+    if (!this._svgRoot) return;
+    const arrowGroups = this._svgRoot.querySelectorAll('.erd-arrow-group');
+    this._portOffsets = this._computePortOffsets();
+    const laneOffsets = this._routingMode === 'orthogonal' ? this._assignLanes() : new Map();
+
+    for (const ag of arrowGroups) {
+      const schema = ag.getAttribute('data-schema');
+      const rel = this._relationships.find(r => r.schemaName === schema);
+      if (!rel) continue;
+      const from = this._positions.get(rel.sourceEntity);
+      const to = this._positions.get(rel.targetEntity);
+      if (!from || !to) continue;
+
+      const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
+      const laneOffset = laneOffsets.get(rel.schemaName) || 0;
+      let d;
+      if (this._routingMode === 'orthogonal') {
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+      } else {
+        const midX = (fx + tx) / 2;
+        d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+      }
+      const path = ag.querySelector('path');
+      if (path) path.setAttribute('d', d);
+
+      const dots = ag.querySelectorAll('.erd-connection-dot');
+      if (dots.length === 2) {
+        dots[0].setAttribute('cx', fx);
+        dots[0].setAttribute('cy', fy);
+        dots[1].setAttribute('cx', tx);
+        dots[1].setAttribute('cy', ty);
+      }
+    }
+
+    // Re-add crossing bumps
+    const arrowParent = this._svgRoot.querySelector('.erd-arrows');
+    if (arrowParent) this._addCrossingBumps(arrowParent);
   }
 
   // -------------------------------------------------------------------------

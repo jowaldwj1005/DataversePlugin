@@ -322,6 +322,10 @@ export class SnakeGame {
   #eatenEntities;
   #entities; // array of { name, entitySetName }
   #apiClient; // optional, for record count lookups
+  #highscoreReady = null; // null=checking, false=absent, string=entitySetName
+  #currentUserId = null;
+  #hintEl = null;
+  #gameOverEl = null;
 
   /**
    * @param {HTMLElement} containerEl
@@ -352,9 +356,17 @@ export class SnakeGame {
     const hint = document.createElement('div');
     hint.className = 'ee-snake-hint';
     hint.textContent = 'Arrow keys or WASD to move · ESC to quit';
+    this.#hintEl = hint;
     this.#overlay.appendChild(hint);
 
+    // Game-over DOM panel (shown over canvas when game ends)
+    this.#gameOverEl = document.createElement('div');
+    this.#gameOverEl.style.cssText = 'display:none; position:absolute; inset:0; flex-direction:column; align-items:center; justify-content:center; background:rgba(13,13,26,0.9); z-index:10; gap:10px; padding:16px; overflow-y:auto;';
+    this.#overlay.appendChild(this.#gameOverEl);
+
     containerEl.appendChild(this.#overlay);
+
+    if (this.#apiClient) this.#checkHighscoreTable();
 
     this.#ctx = this.#canvas.getContext('2d');
     this._resize();
@@ -386,6 +398,7 @@ export class SnakeGame {
     this.#score = 0;
     this.#gameOver = false;
     this.#eatenEntities = [];
+    if (this.#gameOverEl) this.#gameOverEl.style.display = 'none';
     this._spawnFood();
   }
 
@@ -425,6 +438,7 @@ export class SnakeGame {
       }
       // Restart on Enter when game over
       if (e.key === 'Enter' && this.#gameOver) {
+        if (this.#gameOverEl) this.#gameOverEl.style.display = 'none';
         this._init();
         e.preventDefault();
       }
@@ -581,6 +595,7 @@ export class SnakeGame {
   _endGame() {
     this.#gameOver = true;
     this._draw();
+    this.#showGameOverPanel();
   }
 
   _updateScore() {
@@ -598,6 +613,186 @@ export class SnakeGame {
       toast.classList.remove('ee-snake-toast-visible');
       setTimeout(() => toast.remove(), 400);
     }, 2500);
+  }
+
+  async #checkHighscoreTable() {
+    try {
+      const data = await this.#apiClient.request('GET',
+        "EntityDefinitions(LogicalName='dvt_snakehighscore')?$select=LogicalName,EntitySetName");
+      this.#highscoreReady = data?.EntitySetName || 'dvt_snakehighscores';
+      const me = await this.#apiClient.request('GET', 'WhoAmI()');
+      this.#currentUserId = me?.UserId || null;
+    } catch {
+      this.#highscoreReady = false;
+      // Show create button in hint
+      if (this.#hintEl) {
+        this.#hintEl.innerHTML = 'Arrow keys or WASD · ESC to quit &nbsp;·&nbsp; '
+          + '<button id="ee-snake-create-hs" style="font-size:0.68rem; padding:2px 8px; background:#3b7dd8; color:#fff; border:none; border-radius:3px; cursor:pointer;">Create Highscore Table</button>';
+        this.#hintEl.querySelector('#ee-snake-create-hs')
+          ?.addEventListener('click', () => this.#createHighscoreTable());
+      }
+    }
+  }
+
+  async #createHighscoreTable() {
+    const btn = this.#hintEl?.querySelector('#ee-snake-create-hs');
+    if (!confirm('Create a custom table "dvt_snakehighscore" in this Dataverse environment to track Snake highscores?\n\nRequires System Administrator / System Customizer privileges.')) return;
+
+    if (btn) { btn.textContent = 'Creating…'; btn.disabled = true; }
+    try {
+      const label = (text) => ({
+        '@odata.type': 'Microsoft.Dynamics.CRM.Label',
+        LocalizedLabels: [{ '@odata.type': 'Microsoft.Dynamics.CRM.LocalizedLabel', Label: text, LanguageCode: 1033 }],
+      });
+
+      await this.#apiClient.request('POST', 'EntityDefinitions', { body: {
+        '@odata.type': 'Microsoft.Dynamics.CRM.EntityMetadata',
+        SchemaName: 'dvt_SnakeHighscore',
+        DisplayName: label('Snake Highscore'),
+        DisplayCollectionName: label('Snake Highscores'),
+        HasActivities: false, HasNotes: false, IsActivity: false,
+        OwnershipType: 'UserOwned',
+        PrimaryNameAttribute: 'dvt_name',
+        Attributes: [{
+          '@odata.type': 'Microsoft.Dynamics.CRM.StringAttributeMetadata',
+          AttributeType: 'String',
+          AttributeTypeName: { Value: 'StringType' },
+          SchemaName: 'dvt_Name',
+          MaxLength: 100,
+          RequiredLevel: { Value: 'None', CanBeChanged: true, ManagedPropertyLogicalName: 'canmodifyrequirementlevelsettings' },
+          DisplayName: label('Name'),
+        }],
+      }});
+
+      await this.#apiClient.request('POST', "EntityDefinitions(LogicalName='dvt_snakehighscore')/Attributes", { body: {
+        '@odata.type': 'Microsoft.Dynamics.CRM.IntegerAttributeMetadata',
+        SchemaName: 'dvt_Score',
+        MinValue: 0, MaxValue: 2147483647, Format: 'None',
+        RequiredLevel: { Value: 'None', CanBeChanged: true, ManagedPropertyLogicalName: 'canmodifyrequirementlevelsettings' },
+        DisplayName: label('Score'),
+      }});
+
+      this.#highscoreReady = 'dvt_snakehighscores';
+      const me = await this.#apiClient.request('GET', 'WhoAmI()');
+      this.#currentUserId = me?.UserId || null;
+
+      if (this.#hintEl) this.#hintEl.textContent = 'Arrow keys or WASD to move · ESC to quit · Highscore table ready!';
+    } catch (err) {
+      if (btn) { btn.textContent = 'Failed'; btn.disabled = false; }
+      alert(`Could not create table: ${err.message}`);
+    }
+  }
+
+  async #showGameOverPanel() {
+    const panel = this.#gameOverEl;
+    if (!panel) return;
+    panel.innerHTML = '';
+    panel.style.display = 'flex';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font:bold 22px Consolas,monospace; color:#f44747;';
+    heading.textContent = 'GAME OVER';
+    panel.appendChild(heading);
+
+    const scoreDiv = document.createElement('div');
+    scoreDiv.style.cssText = 'font:bold 15px Consolas,monospace; color:#d4af37;';
+    scoreDiv.textContent = `Score: ${this.#score}`;
+    panel.appendChild(scoreDiv);
+
+    if (this.#highscoreReady) {
+      const savedMsg = document.createElement('div');
+      savedMsg.style.cssText = 'font-size:0.7rem; color:#4ec9b0;';
+      savedMsg.textContent = 'Saving score…';
+      panel.appendChild(savedMsg);
+      try {
+        await this.#saveScore();
+        savedMsg.textContent = 'Score saved!';
+      } catch {
+        savedMsg.textContent = '';
+      }
+      await this.#renderLeaderboard(panel);
+
+    } else if (this.#highscoreReady === false) {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'font-size:0.72rem; color:#808080; text-align:center; max-width:220px;';
+      msg.textContent = 'Want to track highscores in Dataverse?';
+      panel.appendChild(msg);
+
+      const createBtn = document.createElement('button');
+      createBtn.textContent = 'Create Highscore Table';
+      createBtn.style.cssText = 'padding:5px 14px; font-size:0.75rem; font-weight:600; background:#3b7dd8; color:#fff; border:none; border-radius:4px; cursor:pointer;';
+      createBtn.addEventListener('click', async () => {
+        await this.#createHighscoreTable();
+        if (this.#highscoreReady) {
+          // Re-render panel now that table exists
+          this.#showGameOverPanel();
+        }
+      });
+      panel.appendChild(createBtn);
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:8px; margin-top:4px;';
+
+    const restartBtn = document.createElement('button');
+    restartBtn.textContent = 'Restart';
+    restartBtn.style.cssText = 'padding:5px 16px; font-size:0.75rem; font-weight:600; background:#4ec9b0; color:#0d0d1a; border:none; border-radius:4px; cursor:pointer;';
+    restartBtn.addEventListener('click', () => { panel.style.display = 'none'; this._init(); });
+
+    const quitBtn = document.createElement('button');
+    quitBtn.textContent = 'Quit';
+    quitBtn.style.cssText = 'padding:5px 14px; font-size:0.75rem; font-weight:600; background:none; color:#808080; border:1px solid #444; border-radius:4px; cursor:pointer;';
+    quitBtn.addEventListener('click', () => this.destroy());
+
+    btnRow.append(restartBtn, quitBtn);
+    panel.appendChild(btnRow);
+  }
+
+  async #saveScore() {
+    const date = new Date().toISOString().slice(0, 10);
+    await this.#apiClient.request('POST', this.#highscoreReady, { body: {
+      dvt_name: `Snake ${this.#score} · ${date}`,
+      dvt_score: this.#score,
+    }});
+  }
+
+  async #renderLeaderboard(panel) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%; max-width:260px; font-size:0.7rem; font-family:Consolas,monospace;';
+    panel.appendChild(wrap);
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:700; color:#4ec9b0; text-align:center; margin-bottom:4px;';
+    title.textContent = '🏆 Highscores';
+    wrap.appendChild(title);
+
+    try {
+      const data = await this.#apiClient.request('GET',
+        `${this.#highscoreReady}?$select=dvt_score,dvt_name,_ownerid_value&$top=10&$orderby=dvt_score desc`,
+        { headers: { Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"' } });
+      const scores = data?.value || [];
+      if (!scores.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:#555; text-align:center;';
+        empty.textContent = 'No scores yet';
+        wrap.appendChild(empty);
+        return;
+      }
+      for (let i = 0; i < scores.length; i++) {
+        const s = scores[i];
+        const isMe = this.#currentUserId && s._ownerid_value === this.#currentUserId;
+        const ownerName = s['_ownerid_value@OData.Community.Display.V1.FormattedValue'] || 'Unknown';
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex; justify-content:space-between; padding:2px 4px; border-radius:3px; ${isMe ? 'color:#d4af37; font-weight:700; background:rgba(212,175,55,0.08);' : 'color:#ccc;'}`;
+        row.innerHTML = `<span>${i + 1}. ${ownerName}</span><span>${s.dvt_score}</span>`;
+        wrap.appendChild(row);
+      }
+    } catch {
+      const err = document.createElement('div');
+      err.style.cssText = 'color:#555; text-align:center;';
+      err.textContent = 'Could not load scores';
+      wrap.appendChild(err);
+    }
   }
 
   destroy() {

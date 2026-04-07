@@ -1066,8 +1066,10 @@ export class FieldSelectorStep {
  */
 export async function fetchAllRecords(apiClient, entitySetName, filter, select, limit = 10000) {
   const records = [];
-  let url = `${entitySetName}?$filter=${encodeURIComponent(filter)}`;
-  if (select) url += `&$select=${encodeURIComponent(select)}`;
+  const params = [];
+  if (filter) params.push(`$filter=${encodeURIComponent(filter)}`);
+  if (select) params.push(`$select=${encodeURIComponent(select)}`);
+  let url = params.length ? `${entitySetName}?${params.join('&')}` : entitySetName;
 
   while (url && records.length < limit) {
     const data = await apiClient.request('GET', url);

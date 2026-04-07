@@ -96,20 +96,20 @@ const API = {
     `solutions?$select=friendlyname,uniquename,version,ismanaged,description`,
 
   globalCustomApis: (isFunction) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname` +
+    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname,customapiid` +
     `&$filter=isfunction eq ${isFunction} and boundentitylogicalname eq null`,
 
   boundCustomApis: (entityLogicalName) =>
-    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname` +
+    `customapis?$select=uniquename,displayname,description,isfunction,boundentitylogicalname,customapiid` +
     `&$filter=boundentitylogicalname eq '${entityLogicalName}'`,
 
-  customApiParams: (uniquename) =>
+  customApiParams: (apiId) =>
     `customapirequestparameters?$select=uniquename,name,description,type,isoptional` +
-    `&$filter=customapiid/uniquename eq '${uniquename}'`,
+    `&$filter=_customapiid_value eq '${apiId}'`,
 
-  customApiResponse: (uniquename) =>
+  customApiResponse: (apiId) =>
     `customapiresponseproperties?$select=uniquename,name,description,type` +
-    `&$filter=customapiid/uniquename eq '${uniquename}'`,
+    `&$filter=_customapiid_value eq '${apiId}'`,
 
   solutionComponents: (solutionUniqueName) =>
     `solutioncomponents?$filter=solutionid/uniquename eq '${solutionUniqueName}' and componenttype eq 1&$select=objectid`,
@@ -154,6 +154,32 @@ function fuzzyMatch(haystack, needle) {
     hi = idx + 1;
   }
   return true;
+}
+
+/** Return searchable strings from a node's data, based on node type. */
+function getSearchableFields(node) {
+  const d = node.data;
+  if (!d) return [];
+  switch (node.type) {
+    case 'entity':
+      return [d.LogicalName, displayName(d), d.EntitySetName, d.SchemaName];
+    case 'attribute':
+      return [d.LogicalName, d.SchemaName, displayName(d)];
+    case 'global-optionset':
+      return [d.Name, displayName(d)];
+    case 'solution':
+      return [d.friendlyname, d.uniquename];
+    case 'customapi':
+      return [d.uniquename, d.displayname, d.description];
+    case 'customapi-param':
+      return [d.name, d.uniquename];
+    case 'relationship':
+      return [d.SchemaName, d.ReferencingEntity, d.ReferencedEntity];
+    case 'key':
+      return [d.LogicalName, d.SchemaName];
+    default:
+      return [];
+  }
 }
 
 async function copyToClipboard(text) {
@@ -1020,7 +1046,7 @@ class ApiExplorer {
 
   /** Build parameter/response sub-categories for a Custom API node. */
   _buildCustomApiSubtree(node) {
-    const uniquename = node.data?.uniquename;
+    const { uniquename, customapiid } = node.data || {};
     const depth = node.depth + 1;
 
     const cats = [
@@ -1036,7 +1062,7 @@ class ApiExplorer {
         expandable: true,
         depth,
         type: cat.type,
-        data: { uniquename },
+        data: { uniquename, customapiid },
         parent: node,
       });
       if (this._expandedState.has(child.id)) child.expanded = true;
@@ -1049,10 +1075,10 @@ class ApiExplorer {
 
   /** Load request parameters or response properties for a Custom API. */
   async _loadCustomApiParams(node, isResponse) {
-    const uniquename = node.data?.uniquename;
-    if (!uniquename) return;
+    const apiId = node.data?.customapiid;
+    if (!apiId) return;
 
-    const url = isResponse ? API.customApiResponse(uniquename) : API.customApiParams(uniquename);
+    const url = isResponse ? API.customApiResponse(apiId) : API.customApiParams(apiId);
     const data = await this._apiGet(url);
     const params = data.value || [];
 
@@ -1122,13 +1148,15 @@ class ApiExplorer {
     const rows = [];
     const filter = this._filter.toLowerCase();
 
-    const nodeMatches = (node) =>
-      fuzzyMatch(node.label, filter) ||
-      (node.data && (
-        fuzzyMatch(node.data.LogicalName || '', filter) ||
-        fuzzyMatch(displayName(node.data) || '', filter) ||
-        fuzzyMatch(node.data.EntitySetName || '', filter)
-      ));
+    const nodeMatches = (node) => {
+      if (fuzzyMatch(node.label, filter)) return true;
+      if (node.sublabel && fuzzyMatch(node.sublabel, filter)) return true;
+      if (!node.data) return false;
+      for (const f of getSearchableFields(node)) {
+        if (f && fuzzyMatch(f, filter)) return true;
+      }
+      return false;
+    };
 
     const anyChildMatches = (node) => {
       for (const child of node.children) {
@@ -1362,7 +1390,7 @@ class ApiExplorer {
         this._showSolutionDetails(node.data);
         break;
       case 'customapi':
-        this._showCustomApiDetails(node.data);
+        this._showCustomApiDetails(node);
         break;
       default:
         this._detailPanel.clear();
@@ -1371,7 +1399,8 @@ class ApiExplorer {
   }
 
   /** Build detail panel for a Custom API node. */
-  _showCustomApiDetails(api) {
+  _showCustomApiDetails(node) {
+    const api = node.data;
     if (!api) return;
     const typeLabel = api.isfunction ? 'Function' : 'Action';
     const bindLabel = api.boundentitylogicalname ? `Bound (${api.boundentitylogicalname})` : 'Unbound';
@@ -1389,6 +1418,21 @@ class ApiExplorer {
         ],
       }],
     });
+
+    // Add execute button for unbound APIs
+    if (!api.boundentitylogicalname && this._detailPanel._root) {
+      const body = this._detailPanel._root.querySelector('.dvt-detail-body');
+      if (body) {
+        const btnWrap = document.createElement('div');
+        btnWrap.style.cssText = 'padding:8px 12px;';
+        const btn = document.createElement('button');
+        btn.className = `${CSS}-exec-btn`;
+        btn.textContent = `\u26A1 Execute ${typeLabel}`;
+        btn.addEventListener('click', () => this._executeCustomApi(node));
+        btnWrap.appendChild(btn);
+        body.appendChild(btnWrap);
+      }
+    }
   }
 
   /** Build detail panel data for an entity. */
@@ -1576,6 +1620,201 @@ class ApiExplorer {
   }
 
   // -------------------------------------------------------------------------
+  // Custom API execution
+  // -------------------------------------------------------------------------
+
+  /** Gather params and execute (or show form) for an unbound Custom API. */
+  async _executeCustomApi(node) {
+    const api = node.data;
+    if (!api?.uniquename) return;
+
+    // Try to get params from already-loaded subtree first
+    const paramsNode = node.children?.find((c) => c.type === 'customapi-params');
+    let params = [];
+    if (paramsNode?.loaded) {
+      params = paramsNode.children.filter((c) => c.type === 'customapi-param').map((c) => c.data);
+    } else if (api.customapiid) {
+      try {
+        const data = await this._apiGet(API.customApiParams(api.customapiid));
+        params = data.value || [];
+      } catch { /* proceed with no params */ }
+    }
+
+    if (params.length > 0) {
+      this._showExecuteForm(api, params, node);
+    } else {
+      this._sendCustomApiRequest(api, {}, node);
+    }
+  }
+
+  /** Show a parameter input form in the detail panel. */
+  _showExecuteForm(api, params, node) {
+    const panel = this._detailPanel;
+    if (!panel?._root) return;
+
+    const body = panel._root.querySelector('.dvt-detail-body');
+    if (!body) return;
+
+    body.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = `${CSS}-exec-title`;
+    title.textContent = `Execute: ${api.uniquename}`;
+    body.appendChild(title);
+
+    const form = document.createElement('div');
+    form.className = `${CSS}-exec-form`;
+
+    const inputs = new Map();
+    for (const p of params) {
+      const row = document.createElement('div');
+      row.className = `${CSS}-exec-field`;
+
+      const label = document.createElement('label');
+      label.textContent = `${p.name || p.uniquename}${p.isoptional ? '' : ' *'}`;
+
+      const hint = document.createElement('span');
+      hint.className = `${CSS}-exec-hint`;
+      hint.textContent = p.type != null ? `Type: ${p.type}` : '';
+      label.appendChild(hint);
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = `${CSS}-exec-input`;
+      input.placeholder = p.description || '';
+
+      row.appendChild(label);
+      row.appendChild(input);
+      form.appendChild(row);
+      inputs.set(p.name || p.uniquename, { input, param: p });
+    }
+
+    const btnRow = document.createElement('div');
+    btnRow.className = `${CSS}-exec-actions`;
+
+    const execBtn = document.createElement('button');
+    execBtn.className = `${CSS}-exec-btn`;
+    execBtn.textContent = `\u26A1 Execute`;
+    execBtn.addEventListener('click', () => {
+      const paramValues = {};
+      for (const [name, { input }] of inputs) {
+        const val = input.value.trim();
+        if (val) {
+          try { paramValues[name] = JSON.parse(val); } catch { paramValues[name] = val; }
+        }
+      }
+      this._sendCustomApiRequest(api, paramValues, node);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = `${CSS}-exec-btn-cancel`;
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => this._showCustomApiDetails(node));
+
+    btnRow.appendChild(execBtn);
+    btnRow.appendChild(cancelBtn);
+    form.appendChild(btnRow);
+    body.appendChild(form);
+  }
+
+  /** Send the actual HTTP request for a Custom API. */
+  async _sendCustomApiRequest(api, paramValues, node) {
+    const method = api.isfunction ? 'GET' : 'POST';
+    let url = api.uniquename;
+    let body;
+
+    if (api.isfunction && Object.keys(paramValues).length > 0) {
+      // OData function call syntax: Name(Param1=@p1,Param2=@p2)?@p1=val&@p2=val
+      const aliases = [];
+      const qs = [];
+      let idx = 0;
+      for (const [name, value] of Object.entries(paramValues)) {
+        const alias = `@p${idx++}`;
+        aliases.push(`${name}=${alias}`);
+        const encoded = typeof value === 'string' ? `'${value}'` : JSON.stringify(value);
+        qs.push(`${alias}=${encodeURIComponent(encoded)}`);
+      }
+      url = `${api.uniquename}(${aliases.join(',')})${qs.length ? `?${qs.join('&')}` : ''}`;
+    } else if (!api.isfunction && Object.keys(paramValues).length > 0) {
+      body = JSON.stringify(paramValues);
+    }
+
+    // Show loading state
+    this._detailPanel.setData({
+      title: `Executing ${api.uniquename}\u2026`,
+      sections: [{ title: 'Status', entries: [{ key: 'status', value: 'Sending request\u2026', label: 'Status' }] }],
+    });
+
+    let response;
+    try {
+      response = await this.apiClient.requestRaw(method, url, {
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body,
+      });
+    } catch (err) {
+      response = { ok: false, status: 0, statusText: 'Network Error', data: null, error: err.message };
+    }
+
+    this._showExecutionResult(api, response, node);
+  }
+
+  /** Display execution result in the detail panel. */
+  _showExecutionResult(api, response, node) {
+    const entries = [
+      { key: 'status', value: `${response.status} ${response.statusText}`, label: 'Status' },
+    ];
+
+    if (response.ok && response.data && typeof response.data === 'object') {
+      for (const [key, value] of Object.entries(response.data)) {
+        if (key.startsWith('@odata')) continue;
+        entries.push({
+          key,
+          value: typeof value === 'object' ? JSON.stringify(value, null, 2) : value,
+          label: key,
+        });
+      }
+    } else if (!response.ok) {
+      const errMsg = response.error
+        || response.data?.error?.message
+        || response.statusText
+        || 'Unknown error';
+      entries.push({ key: 'error', value: errMsg, label: 'Error' });
+    }
+
+    this._detailPanel.setData({
+      title: `Result: ${api.uniquename}`,
+      raw: response.data || { error: response.error },
+      sections: [{
+        title: response.ok ? 'Success' : 'Error',
+        entries,
+      }],
+    });
+
+    // Add "Back" and "Re-execute" buttons
+    if (this._detailPanel._root) {
+      const body = this._detailPanel._root.querySelector('.dvt-detail-body');
+      if (body) {
+        const btnRow = document.createElement('div');
+        btnRow.className = `${CSS}-exec-actions`;
+
+        const backBtn = document.createElement('button');
+        backBtn.className = `${CSS}-exec-btn-cancel`;
+        backBtn.textContent = '\u2190 Back';
+        backBtn.addEventListener('click', () => this._showCustomApiDetails(node));
+
+        const rerunBtn = document.createElement('button');
+        rerunBtn.className = `${CSS}-exec-btn`;
+        rerunBtn.textContent = '\u26A1 Re-execute';
+        rerunBtn.addEventListener('click', () => this._executeCustomApi(node));
+
+        btnRow.appendChild(backBtn);
+        btnRow.appendChild(rerunBtn);
+        body.appendChild(btnRow);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Context menu
   // -------------------------------------------------------------------------
 
@@ -1728,6 +1967,21 @@ class ApiExplorer {
           label: `Navigate to ${targetEntity}`,
           action: () => this._navigateToEntity(targetEntity),
         });
+      }
+    } else if (node.type === 'customapi') {
+      const api = node.data;
+      items.push({
+        label: 'Copy Unique Name',
+        action: () => copyToClipboard(api.uniquename),
+      });
+      if (!api.boundentitylogicalname) {
+        items.push(
+          { separator: true },
+          {
+            label: `Execute ${api.isfunction ? 'Function' : 'Action'}`,
+            action: () => this._executeCustomApi(node),
+          },
+        );
       }
     }
 
@@ -2064,6 +2318,77 @@ class ApiExplorer {
         height: 1px;
         background: var(--dvt-border, #e0e0e0);
         margin: 4px 0;
+      }
+
+      /* Execute custom API */
+      .${CSS}-exec-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #fff;
+        background: var(--dvt-accent, #0078d4);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .${CSS}-exec-btn:hover { opacity: 0.85; }
+      .${CSS}-exec-btn-cancel {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 14px;
+        font-size: 12px;
+        color: var(--dvt-text, #1e1e1e);
+        background: var(--dvt-hover, #f0f6ff);
+        border: 1px solid var(--dvt-border, #d0d0d0);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .${CSS}-exec-btn-cancel:hover { background: var(--dvt-border, #e0e0e0); }
+      .${CSS}-exec-title {
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .${CSS}-exec-form {
+        padding: 4px 12px;
+      }
+      .${CSS}-exec-field {
+        margin-bottom: 8px;
+      }
+      .${CSS}-exec-field label {
+        display: block;
+        font-size: 11px;
+        margin-bottom: 2px;
+        color: var(--dvt-text-muted, #666);
+      }
+      .${CSS}-exec-hint {
+        margin-left: 6px;
+        font-weight: 400;
+        opacity: 0.6;
+      }
+      .${CSS}-exec-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-family: inherit;
+        color: var(--dvt-text, #1e1e1e);
+        background: var(--dvt-input-bg, #fff);
+        border: 1px solid var(--dvt-border, #d0d0d0);
+        border-radius: 4px;
+      }
+      .${CSS}-exec-input:focus {
+        outline: none;
+        border-color: var(--dvt-accent, #0078d4);
+      }
+      .${CSS}-exec-actions {
+        display: flex;
+        gap: 8px;
+        padding: 8px 12px;
       }
     `;
     document.head.appendChild(style);

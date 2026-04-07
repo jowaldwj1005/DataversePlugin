@@ -34,10 +34,7 @@ let lastEnvData = null;
 function sendToBackground(data) {
   const { clientUrl, orgName, orgId, apiVersion, token } = data;
 
-  if (!clientUrl) {
-    console.warn('[Dataverse Toolkit] No client URL extracted — skipping background update.');
-    return;
-  }
+  if (!clientUrl) return;
 
   lastEnvData = data;
 
@@ -55,7 +52,6 @@ function sendToBackground(data) {
     },
   }).catch((err) => {
     if (err.message?.includes('Extension context invalidated')) return; // stale script, ignore
-    console.log('[Dataverse Toolkit] Failed to send to background:', err.message);
   });
 }
 
@@ -73,10 +69,7 @@ window.addEventListener('message', (event) => {
 
   if (event.data.type === 'EXTRACT_RESULT') {
     if (event.data.success) {
-      console.log('[Dataverse Toolkit] Environment data extracted:', event.data.data);
       sendToBackground(event.data.data);
-    } else {
-      console.log('[Dataverse Toolkit] Extraction attempt:', event.data.error);
     }
   }
 });
@@ -144,4 +137,3 @@ extractionTimerId = setInterval(() => {
   requestExtraction();
 }, TOKEN_REFRESH_INTERVAL_MS);
 
-console.log('[Dataverse Toolkit] Content script loaded on', window.location.hostname);

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 280" width="440" height="280">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4"/>
+      <stop offset="100%" style="stop-color:#00bcf2"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:rgba(255,255,255,0.12)"/>
+      <stop offset="100%" style="stop-color:rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="440" height="280" fill="url(#bg)"/>
+  <rect width="440" height="280" fill="url(#shine)"/>
+
+  <!-- Subtle grid pattern -->
+  <g stroke="rgba(255,255,255,0.06)" stroke-width="1">
+    <line x1="0" y1="56" x2="440" y2="56"/>
+    <line x1="0" y1="112" x2="440" y2="112"/>
+    <line x1="0" y1="168" x2="440" y2="168"/>
+    <line x1="0" y1="224" x2="440" y2="224"/>
+    <line x1="88" y1="0" x2="88" y2="280"/>
+    <line x1="176" y1="0" x2="176" y2="280"/>
+    <line x1="264" y1="0" x2="264" y2="280"/>
+    <line x1="352" y1="0" x2="352" y2="280"/>
+  </g>
+
+  <!-- Icon (left side) -->
+  <g transform="translate(52, 80)">
+    <!-- Icon background pill -->
+    <rect x="-16" y="-16" width="112" height="112" rx="22" fill="rgba(255,255,255,0.15)"/>
+    <!-- Database cylinders -->
+    <ellipse cx="40" cy="14" rx="26" ry="9" fill="none" stroke="white" stroke-width="3.5"/>
+    <path d="M14 14 v13 c0 5 11.6 9 26 9 s26-4 26-9 V14" fill="none" stroke="white" stroke-width="3.5"/>
+    <path d="M14 27 v13 c0 5 11.6 9 26 9 s26-4 26-9 V27" fill="none" stroke="white" stroke-width="3.5"/>
+    <path d="M14 40 v13 c0 5 11.6 9 26 9 s26-4 26-9 V40" fill="none" stroke="white" stroke-width="3.5"/>
+    <!-- API brackets -->
+    <path d="M4 30 l-5 7 5 7" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M76 30 l5 7 -5 7" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Text (right side) -->
+  <text x="196" y="118" font-family="-apple-system, 'Segoe UI', Arial, sans-serif" font-size="32" font-weight="700" fill="white" letter-spacing="-0.5">Dataverse</text>
+  <text x="196" y="154" font-family="-apple-system, 'Segoe UI', Arial, sans-serif" font-size="32" font-weight="700" fill="white" letter-spacing="-0.5">Toolkit</text>
+  <text x="196" y="182" font-family="-apple-system, 'Segoe UI', Arial, sans-serif" font-size="14" font-weight="400" fill="rgba(255,255,255,0.75)">Developer tools for Power Platform</text>
+</svg>

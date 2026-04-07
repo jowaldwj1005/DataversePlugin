@@ -1,7 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Dataverse Toolkit",
+  "short_name": "DV Toolkit",
   "version": "1.0.0",
+  "author": "jwald",
   "description": "Professional Dataverse Web API explorer, FetchXML builder, and developer toolkit",
   "permissions": [
     "activeTab",
