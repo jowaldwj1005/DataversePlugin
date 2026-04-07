@@ -23,7 +23,7 @@ Every feature was designed and implemented in conversation, from the first API p
 
 Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, custom APIs (actions/functions), and solutions — with full metadata details and virtual scrolling for large orgs.
 
-<img src="image.png" width="600"> <img src="image-1.png" width="600">
+<img src="image-1.png" width="600">
 
 ---
 
@@ -66,6 +66,8 @@ Build and execute `$batch` requests with a wizard system:
 
 Supports ChangeSets (transactional groups), drag-and-drop reordering, and a guided single-operation builder with type-aware inputs for every field type.
 
+<img src="image7.png" width="600"> 
+
 ---
 
 ### Security Inspector
@@ -75,6 +77,8 @@ Supports ChangeSets (transactional groups), drag-and-drop reordering, and a guid
 - User permission lookup via `RetrieveUserPrivileges` (all privileges across direct + team roles)
 - Field-level security profiles
 - Audit configuration viewer
+
+<img src="image.png" width="600"> 
 
 ---
 
@@ -95,6 +99,8 @@ Load any unmanaged Dataverse solution and get a fully interactive entity-relatio
 - **Keyboard shortcuts** — `+`/`-` zoom, `0` reset, `f` filter, `Escape` clear selection
 
 All in ~1500 lines of vanilla JS and SVG — no D3, no Cytoscape, no graph library.
+
+<img src="imag-0.png" width="600"> 
 
 ---
 
