@@ -104,10 +104,38 @@ All in ~1500 lines of vanilla JS and SVG — no D3, no Cytoscape, no graph libra
 
 ---
 
-### Settings
-<!-- screenshot: settings tab showing theme toggle and connection info -->
+### Agent Tool Builder
 
-Theme switching (light/dark), connection status, metadata cache management.
+Generate AI-ready tool schemas from any Dataverse entity. Select an entity, pick columns, add 1:N child entities for deep insert — outputs ready-to-use JSON Schema definitions for Claude, OpenAI, or MCP tool configurations. Includes deep insert templates and API endpoint info.
+
+---
+
+### AI Customizer (BYOK)
+
+> **Warning:** This feature modifies live Dataverse views. While it includes validation and a revert button, use at your own risk — always test on non-critical views first. The author takes no responsibility for broken views or lost configurations. During development, the built-in "Revert to Backup" button was used regularly to restore views.
+
+Modify and create Dataverse views using natural language. Bring your own API key (OpenAI, Azure OpenAI, Anthropic, or any compatible endpoint).
+
+- **Conversational UI** — chat-based interface where follow-up prompts build on previous changes
+- **Multi-turn agent** — automatically requests related entity metadata when generating link-entity columns
+- **Inline questions** — the agent can ask for clarification before making changes
+- **XML diff** — color-coded before/after with word-level highlighting and fullscreen toggle
+- **Validation** — blocks invalid XML patterns before applying (wrong suffixes, duplicates, nested link-entities)
+- **View creation** — create new saved queries from scratch via "+New"
+- **Debug console** — full transparency: every API call, prompt, and response is logged and expandable
+- **System prompt editor** — inspect and temporarily override the system prompt per session
+
+---
+
+### Form Inspector
+
+Inspect the current Dynamics 365 form context — read field values, form type, entity metadata, and control states from the live Xrm.Page context.
+
+---
+
+### Settings
+
+Theme switching (light/dark/high-contrast), metadata cache TTL, AI provider configuration (endpoint, API key, model with live endpoint preview).
 
 ---
 

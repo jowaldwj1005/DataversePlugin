@@ -36,16 +36,16 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 const TAB_DEFINITIONS = Object.freeze([
-  { id: 'explorer', label: 'Explorer', icon: '\uD83D\uDD0D' },
-  { id: 'fetchxml', label: 'Query', icon: '\uD83D\uDCC4' },
-  { id: 'request', label: 'Request', icon: '\u26A1' },
-  { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6' },
-  { id: 'security', label: 'Security', icon: '\uD83D\uDD12' },
-  { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F' },
-  { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9' },
-  { id: 'aicustomizer', label: 'AI', icon: '\u2728' },
-  { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB' },
-  { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F' },
+  { id: 'explorer', label: 'Explorer', icon: '\uD83D\uDD0D', tip: 'Browse tables, columns, relationships, solutions, and custom APIs' },
+  { id: 'fetchxml', label: 'Query', icon: '\uD83D\uDCC4', tip: 'Visual FetchXML / OData query builder with code generation' },
+  { id: 'request', label: 'Request', icon: '\u26A1', tip: 'Send raw Web API requests with autocomplete and response viewer' },
+  { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6', tip: 'Batch operations: create, update, delete, assign, export/import' },
+  { id: 'security', label: 'Security', icon: '\uD83D\uDD12', tip: 'Role privileges, user permissions, field-level security' },
+  { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F', tip: 'Entity-relationship diagrams for any solution' },
+  { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9', tip: 'Generate AI tool schemas (Claude/OpenAI/MCP) from entity metadata' },
+  { id: 'aicustomizer', label: 'AI', icon: '\u2728', tip: 'Modify and create views via natural language (BYOK: OpenAI/Azure/Anthropic)' },
+  { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB', tip: 'Inspect and interact with the current form context' },
+  { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F', tip: 'Theme, cache, AI provider configuration' },
 ]);
 
 // ---------------------------------------------------------------------------
@@ -409,7 +409,7 @@ class DataverseToolkit {
       const btn = document.createElement('button');
       btn.className = `${CSS_PREFIX}-tab-btn${tab.id === this._activeTab ? ' active' : ''}`;
       btn.dataset.tab = tab.id;
-      btn.title = `${tab.label} (Ctrl+${i + 1})`;
+      btn.title = `${tab.tip || tab.label} (Ctrl+${i + 1})`;
       btn.innerHTML = `<span class="${CSS_PREFIX}-tab-icon">${tab.icon}</span><span class="${CSS_PREFIX}-tab-label">${tab.label}</span>`;
       btn.addEventListener('click', () => this._switchTab(tab.id));
       bar.appendChild(btn);

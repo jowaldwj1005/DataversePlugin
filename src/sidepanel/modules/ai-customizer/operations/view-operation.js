@@ -96,22 +96,27 @@ export class ViewOperation extends OperationBase {
     const viewLabel = document.createElement('label');
     viewLabel.className = `${CSS}-select-label`;
     viewLabel.textContent = 'View';
+
+    // Row: dropdown + "+New" button side by side
+    const viewRow = document.createElement('div');
+    viewRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
     this.#viewSelect = document.createElement('select');
     this.#viewSelect.className = `${CSS}-select`;
+    this.#viewSelect.style.flex = '1';
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.textContent = 'Select view...';
     this.#viewSelect.appendChild(placeholder);
     this.#viewSelect.addEventListener('change', () => this.#onViewChanged());
-    // "+New" button
+
     const newBtn = document.createElement('button');
     newBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
     newBtn.textContent = '+New';
     newBtn.title = 'Create a new view';
-    newBtn.style.cssText = 'align-self:flex-end;margin-bottom:2px;flex-shrink:0;';
     newBtn.addEventListener('click', () => this.#enterCreateMode());
 
-    viewGroup.append(viewLabel, this.#viewSelect, newBtn);
+    viewRow.append(this.#viewSelect, newBtn);
 
     // Hidden new-view name input (shown in create mode)
     this.#newNameInput = document.createElement('input');
@@ -119,8 +124,8 @@ export class ViewOperation extends OperationBase {
     this.#newNameInput.className = `${CSS}-select`;
     this.#newNameInput.placeholder = 'New view name...';
     this.#newNameInput.style.display = 'none';
-    viewGroup.appendChild(this.#newNameInput);
 
+    viewGroup.append(viewLabel, viewRow, this.#newNameInput);
     container.append(typeGroup, viewGroup);
   }
 
@@ -295,9 +300,14 @@ CRITICAL: NEVER add "name" suffix to ANY lookup cell name!
   CORRECT: <cell name="createdby" />       ← correct for ALL lookups
   CORRECT: <cell name="jw_threadid" />     ← correct for ALL lookups
 
-CRITICAL: NEVER use link-entity to fetch the primary name of a related record! The lookup already does this.
-  WRONG: link-entity to get jw_title from jw_thread — the jw_threadid lookup already shows it!
-  CORRECT: Just <attribute name="jw_threadid" /> and <cell name="jw_threadid" />.
+CRITICAL: NEVER include the primary name field of a related entity in a link-entity!
+The lookup column ALREADY shows it automatically. Adding it again via link-entity is redundant and wastes a column.
+  WRONG: link-entity with <attribute name="jw_title" /> when jw_threadid lookup already shows jw_title!
+  WRONG: link-entity with <attribute name="jw_name" /> when the lookup already shows the name!
+  WRONG: link-entity with <attribute name="fullname" /> when createdby lookup already shows the user's name!
+  CORRECT: Only use link-entity for fields that are NOT the primary name (e.g. jw_status, statecode, emailaddress).
+  CORRECT: The lookup cell (<cell name="jw_threadid" />) already displays the primary name as a clickable link.
+Before adding ANY field via link-entity, ask yourself: "Is this the primary name of that entity?" If yes, DON'T — the lookup handles it.
 
 For Status/StateCode fields, the cell uses the "name" suffix:
   fetchxml:  <attribute name="statecode" />

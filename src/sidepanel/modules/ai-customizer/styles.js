@@ -333,12 +333,10 @@ export function injectStyles() {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 12px;
+      padding: 4px 8px;
       background: var(--color-bg-sidebar, var(--color-bg-panel));
       border-bottom: 1px solid var(--color-border-subtle);
-      position: sticky;
-      top: 0;
-      z-index: 1;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     }
     .${CSS}-diff-title {
       font-size: 0.75rem;
@@ -473,31 +471,6 @@ export function injectStyles() {
     .${CSS}-sysprompt-textarea:focus {
       border-color: var(--color-border-focus);
       outline: none;
-    }
-
-    /* Resize handle */
-    .${CSS}-resize-handle {
-      height: 5px;
-      flex-shrink: 0;
-      cursor: row-resize;
-      background: var(--color-border-subtle);
-      position: relative;
-      transition: background 0.15s;
-    }
-    .${CSS}-resize-handle:hover,
-    .${CSS}-resize-handle-active {
-      background: var(--color-accent-primary);
-    }
-    .${CSS}-resize-handle::after {
-      content: '';
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: 24px;
-      height: 2px;
-      border-radius: 1px;
-      background: var(--color-text-disabled);
     }
 
     /* ================================================================
