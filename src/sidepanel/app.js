@@ -28,6 +28,11 @@ const DEFAULT_SETTINGS = Object.freeze({
   cacheTTL: 3600000,
   defaultPageSize: 50,
   maxPageSize: 5000,
+  aiProvider: '',
+  aiEndpoint: '',
+  aiApiKey: '',
+  aiModel: '',
+  aiMaxTokens: 4096,
 });
 
 const TAB_DEFINITIONS = Object.freeze([
@@ -38,6 +43,8 @@ const TAB_DEFINITIONS = Object.freeze([
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12' },
   { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F' },
   { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9' },
+  { id: 'aicustomizer', label: 'AI', icon: '\u2728' },
+  { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB' },
   { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F' },
 ]);
 
@@ -583,6 +590,22 @@ class DataverseToolkit {
           break;
         }
 
+        case 'aicustomizer': {
+          const { default: AiCustomizer } = await import('./modules/ai-customizer.js');
+          const module = new AiCustomizer(container, this.api, this.cache);
+          module.render();
+          this._modules[tabId] = module;
+          break;
+        }
+
+        case 'formtools': {
+          const { default: FormTools } = await import('./modules/form-tools.js');
+          const module = new FormTools(container, this.api, this.cache);
+          module.render();
+          this._modules[tabId] = module;
+          break;
+        }
+
         default:
           container.textContent = 'Unknown module.';
       }
@@ -635,6 +658,51 @@ class DataverseToolkit {
                value="${this._settings.maxPageSize}" />
       </div>
 
+      <h3 class="${CSS_PREFIX}-settings-title" style="margin-top:20px;">AI Provider (BYOK)</h3>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <label class="${CSS_PREFIX}-settings-label">Provider</label>
+        <select id="setting-ai-provider" class="${CSS_PREFIX}-settings-select">
+          <option value=""${!this._settings.aiProvider ? ' selected' : ''}>Not configured</option>
+          <option value="openai"${this._settings.aiProvider === 'openai' ? ' selected' : ''}>OpenAI</option>
+          <option value="azure"${this._settings.aiProvider === 'azure' ? ' selected' : ''}>Azure OpenAI</option>
+          <option value="anthropic"${this._settings.aiProvider === 'anthropic' ? ' selected' : ''}>Anthropic (Claude)</option>
+          <option value="custom"${this._settings.aiProvider === 'custom' ? ' selected' : ''}>Custom (OpenAI-compatible)</option>
+        </select>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <label class="${CSS_PREFIX}-settings-label">Endpoint URL</label>
+        <input id="setting-ai-endpoint" type="url" class="${CSS_PREFIX}-settings-input"
+               value="${this._settings.aiEndpoint || ''}"
+               placeholder="https://api.openai.com/v1" />
+        <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;">
+          OpenAI: https://api.openai.com/v1 · Azure: https://YOUR.openai.azure.com/openai/deployments/MODEL · Anthropic: https://api.anthropic.com/v1
+        </small>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <label class="${CSS_PREFIX}-settings-label">API Key</label>
+        <input id="setting-ai-key" type="password" class="${CSS_PREFIX}-settings-input"
+               value="${this._settings.aiApiKey || ''}"
+               placeholder="sk-... or your key" />
+        <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;">
+          Stored locally in chrome.storage.local. Never sent to Dataverse.
+        </small>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group">
+        <label class="${CSS_PREFIX}-settings-label">Model</label>
+        <input id="setting-ai-model" type="text" class="${CSS_PREFIX}-settings-input"
+               value="${this._settings.aiModel || ''}"
+               placeholder="gpt-4o / claude-sonnet-4-5-20250514 / ..." />
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group" id="ai-endpoint-preview-group" style="display:none;">
+        <label class="${CSS_PREFIX}-settings-label">Resulting API Endpoint</label>
+        <code id="ai-endpoint-preview" style="display:block;padding:6px 8px;background:var(--color-bg-input);border:1px solid var(--color-border-subtle);border-radius:var(--radius-sm);font-size:0.72rem;color:var(--color-accent-secondary);word-break:break-all;"></code>
+      </div>
+
       <div class="${CSS_PREFIX}-settings-actions">
         <button id="setting-save" class="${CSS_PREFIX}-btn-primary">Save Settings</button>
         <button id="setting-clear-cache" class="${CSS_PREFIX}-btn-secondary">Clear Metadata Cache</button>
@@ -680,6 +748,59 @@ class DataverseToolkit {
       this._applyTheme(this._settings.theme);
     });
 
+    // AI endpoint preview — updates live as provider/endpoint change
+    const _updateAiPreview = () => {
+      const provider = container.querySelector('#setting-ai-provider')?.value || '';
+      const endpoint = (container.querySelector('#setting-ai-endpoint')?.value || '').replace(/\/+$/, '');
+      const previewGroup = container.querySelector('#ai-endpoint-preview-group');
+      const previewCode = container.querySelector('#ai-endpoint-preview');
+      if (!previewGroup || !previewCode) return;
+
+      if (!provider || !endpoint) {
+        previewGroup.style.display = 'none';
+        return;
+      }
+
+      let url;
+      switch (provider) {
+        case 'openai':
+        case 'custom':
+          url = `${endpoint}/chat/completions`;
+          break;
+        case 'azure':
+          url = `${endpoint}/chat/completions?api-version=2024-06-01`;
+          break;
+        case 'anthropic':
+          url = `${endpoint}/messages`;
+          break;
+        default:
+          url = endpoint;
+      }
+
+      let auth;
+      switch (provider) {
+        case 'openai':
+        case 'custom':
+          auth = 'Authorization: Bearer <key>';
+          break;
+        case 'azure':
+          auth = 'api-key: <key>';
+          break;
+        case 'anthropic':
+          auth = 'x-api-key: <key>';
+          break;
+        default:
+          auth = '';
+      }
+
+      previewCode.textContent = `POST ${url}\n${auth}`;
+      previewGroup.style.display = '';
+    };
+
+    container.querySelector('#setting-ai-provider')?.addEventListener('change', _updateAiPreview);
+    container.querySelector('#setting-ai-endpoint')?.addEventListener('input', _updateAiPreview);
+    _updateAiPreview(); // initial render
+
     container.querySelector('#setting-save')?.addEventListener('click', () => {
       const ttlInput = container.querySelector('#setting-cache-ttl');
       const pageSizeInput = container.querySelector('#setting-page-size');
@@ -688,6 +809,12 @@ class DataverseToolkit {
       this._settings.cacheTTL = (parseInt(ttlInput?.value, 10) || 60) * 60000;
       this._settings.defaultPageSize = parseInt(pageSizeInput?.value, 10) || 50;
       this._settings.maxPageSize = parseInt(maxPageInput?.value, 10) || 5000;
+
+      // AI provider settings
+      this._settings.aiProvider = container.querySelector('#setting-ai-provider')?.value || '';
+      this._settings.aiEndpoint = container.querySelector('#setting-ai-endpoint')?.value?.replace(/\/+$/, '') || '';
+      this._settings.aiApiKey = container.querySelector('#setting-ai-key')?.value || '';
+      this._settings.aiModel = container.querySelector('#setting-ai-model')?.value || '';
 
       this.cache.setTTL(this._settings.cacheTTL);
       this._saveSettings();

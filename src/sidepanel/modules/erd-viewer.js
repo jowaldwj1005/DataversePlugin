@@ -54,6 +54,54 @@ const FR_DAMPING = 0.85;
 const FR_ITERATIONS = 120;
 
 // ---------------------------------------------------------------------------
+// Binary min-heap for A* priority queue
+// ---------------------------------------------------------------------------
+
+class MinHeap {
+  constructor() { this._data = []; }
+  get size() { return this._data.length; }
+
+  push(item) {
+    this._data.push(item);
+    this._up(this._data.length - 1);
+  }
+
+  pop() {
+    const top = this._data[0];
+    const last = this._data.pop();
+    if (this._data.length > 0) {
+      this._data[0] = last;
+      this._down(0);
+    }
+    return top;
+  }
+
+  _up(i) {
+    const d = this._data;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (d[p].f <= d[i].f) break;
+      [d[p], d[i]] = [d[i], d[p]];
+      i = p;
+    }
+  }
+
+  _down(i) {
+    const d = this._data;
+    const n = d.length;
+    while (true) {
+      let min = i;
+      const l = 2 * i + 1, r = 2 * i + 2;
+      if (l < n && d[l].f < d[min].f) min = l;
+      if (r < n && d[r].f < d[min].f) min = r;
+      if (min === i) break;
+      [d[min], d[i]] = [d[i], d[min]];
+      i = min;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -155,7 +203,7 @@ export default class ErdViewer {
     this._adjacency = new Map();    // logicalName → Set<logicalName>
 
     // Layout & routing
-    this._layoutMode = 'force';     // 'force' | 'grid'
+    this._layoutMode = 'hierarchy';  // 'hierarchy' | 'force' | 'grid'
     this._routingMode = 'orthogonal'; // 'bezier' | 'orthogonal'
 
     // Filter state
@@ -242,15 +290,21 @@ export default class ErdViewer {
       else this._showNotification('Select a solution first', 'warning');
     });
 
-    // Layout toggle
+    // Layout toggle (hierarchy → force → grid cycle)
+    const layoutCycle = ['hierarchy', 'force', 'grid'];
+    const layoutLabels = { hierarchy: 'Hierarchy', force: 'Force', grid: 'Grid' };
+    const nextLayout = (mode) => layoutCycle[(layoutCycle.indexOf(mode) + 1) % layoutCycle.length];
     const layoutBtn = document.createElement('button');
     layoutBtn.className = 'erd-btn erd-btn-secondary';
-    layoutBtn.textContent = 'Grid';
-    layoutBtn.title = 'Toggle layout: Force / Grid';
+    layoutBtn.textContent = layoutLabels[nextLayout(this._layoutMode)];
+    layoutBtn.title = 'Toggle layout: Hierarchy / Force / Grid';
+    this._layoutBtn = layoutBtn;
+    this._nextLayout = nextLayout;
+    this._layoutLabels = layoutLabels;
     layoutBtn.addEventListener('click', () => {
       const oldPositions = new Map(this._positions);
-      this._layoutMode = this._layoutMode === 'force' ? 'grid' : 'force';
-      layoutBtn.textContent = this._layoutMode === 'force' ? 'Grid' : 'Force';
+      this._layoutMode = nextLayout(this._layoutMode);
+      layoutBtn.textContent = layoutLabels[nextLayout(this._layoutMode)];
       this._renderERD();
       this._animateLayoutTransition(oldPositions, new Map(this._positions));
     });
@@ -662,11 +716,13 @@ export default class ErdViewer {
 
       this._renderERD();
 
-      // Restore saved entity positions if available
+      // Restore saved layout if available
       try {
         const stored = await chrome.storage?.local?.get(`erd_layout_${uniqueName}`);
-        const positions = stored?.[`erd_layout_${uniqueName}`];
-        if (positions && typeof positions === 'object') {
+        const data = stored?.[`erd_layout_${uniqueName}`];
+        if (data && typeof data === 'object') {
+          // Support both old format (flat positions) and new format (with layoutMode)
+          const positions = data.positions || data;
           let restored = false;
           for (const ent of this._entities) {
             const pos = positions[ent.LogicalName];
@@ -676,6 +732,13 @@ export default class ErdViewer {
               restored = true;
             }
           }
+          if (data.layoutMode) {
+            this._layoutMode = data.layoutMode;
+            if (this._layoutBtn) {
+              this._layoutBtn.textContent = this._layoutLabels[this._nextLayout(this._layoutMode)];
+            }
+          }
+          if (data.routingMode) this._routingMode = data.routingMode;
           if (restored) this._renderERD();
         }
       } catch { /* ok */ }
@@ -996,6 +1059,185 @@ export default class ErdViewer {
   }
 
   // -------------------------------------------------------------------------
+  // Hierarchical layout (Sugiyama-style)
+  // -------------------------------------------------------------------------
+
+  _computeHierarchyLayout() {
+    const entities = this._entities;
+    const n = entities.length;
+    if (n === 0) return;
+
+    const names = entities.map(e => e.LogicalName);
+    const nameSet = new Set(names);
+
+    // Step 1: Layer assignment via longest-path layering on 1:N edges
+    const inDegree = new Map();
+    const children = new Map();
+    for (const name of names) {
+      inDegree.set(name, 0);
+      children.set(name, []);
+    }
+
+    for (const rel of this._relationships) {
+      if (rel.type !== '1:N') continue;
+      if (!nameSet.has(rel.sourceEntity) || !nameSet.has(rel.targetEntity)) continue;
+      if (rel.sourceEntity === rel.targetEntity) continue; // skip self-refs
+      children.get(rel.sourceEntity).push(rel.targetEntity);
+      inDegree.set(rel.targetEntity, inDegree.get(rel.targetEntity) + 1);
+    }
+
+    const layers = new Map();
+    const queue = [];
+    for (const [name, deg] of inDegree) {
+      if (deg === 0) { layers.set(name, 0); queue.push(name); }
+    }
+
+    // BFS longest-path: child layer = max(parent layer) + 1
+    const visited = new Set();
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      if (visited.has(cur)) {
+        // Update layer but don't re-queue children if already visited
+        continue;
+      }
+      visited.add(cur);
+      const curLayer = layers.get(cur);
+      for (const child of children.get(cur)) {
+        const newLayer = curLayer + 1;
+        if (!layers.has(child) || layers.get(child) < newLayer) {
+          layers.set(child, newLayer);
+        }
+        queue.push(child);
+      }
+    }
+
+    // Assign unvisited/disconnected entities to layer 0
+    for (const name of names) {
+      if (!layers.has(name)) layers.set(name, 0);
+    }
+
+    // Step 2: Group by layer
+    const layerGroups = new Map();
+    for (const [name, layer] of layers) {
+      if (!layerGroups.has(layer)) layerGroups.set(layer, []);
+      layerGroups.get(layer).push(name);
+    }
+    const sortedLayers = [...layerGroups.keys()].sort((a, b) => a - b);
+
+    // Step 3: Crossing minimization (barycenter heuristic, 4 sweeps)
+    // Build parent lookup for each entity
+    const parents = new Map();
+    for (const name of names) parents.set(name, []);
+    for (const rel of this._relationships) {
+      if (rel.type !== '1:N') continue;
+      if (!nameSet.has(rel.sourceEntity) || !nameSet.has(rel.targetEntity)) continue;
+      if (rel.sourceEntity === rel.targetEntity) continue;
+      parents.get(rel.targetEntity).push(rel.sourceEntity);
+    }
+
+    for (let sweep = 0; sweep < 4; sweep++) {
+      // Top-down pass
+      for (let li = 1; li < sortedLayers.length; li++) {
+        const layer = sortedLayers[li];
+        const ents = layerGroups.get(layer);
+        const prevLayer = layerGroups.get(sortedLayers[li - 1]);
+        const prevOrder = new Map();
+        prevLayer.forEach((name, idx) => prevOrder.set(name, idx));
+
+        ents.sort((a, b) => {
+          const aP = (parents.get(a) || []).filter(p => prevOrder.has(p));
+          const bP = (parents.get(b) || []).filter(p => prevOrder.has(p));
+          const aC = aP.length > 0 ? aP.reduce((s, p) => s + prevOrder.get(p), 0) / aP.length : prevOrder.size / 2;
+          const bC = bP.length > 0 ? bP.reduce((s, p) => s + prevOrder.get(p), 0) / bP.length : prevOrder.size / 2;
+          return aC - bC;
+        });
+        layerGroups.set(layer, ents);
+      }
+
+      // Bottom-up pass
+      for (let li = sortedLayers.length - 2; li >= 0; li--) {
+        const layer = sortedLayers[li];
+        const ents = layerGroups.get(layer);
+        const nextLayer = layerGroups.get(sortedLayers[li + 1]);
+        const nextOrder = new Map();
+        nextLayer.forEach((name, idx) => nextOrder.set(name, idx));
+
+        ents.sort((a, b) => {
+          const aCh = (children.get(a) || []).filter(c => nextOrder.has(c));
+          const bCh = (children.get(b) || []).filter(c => nextOrder.has(c));
+          const aC = aCh.length > 0 ? aCh.reduce((s, c) => s + nextOrder.get(c), 0) / aCh.length : nextOrder.size / 2;
+          const bC = bCh.length > 0 ? bCh.reduce((s, c) => s + nextOrder.get(c), 0) / bCh.length : nextOrder.size / 2;
+          return aC - bC;
+        });
+        layerGroups.set(layer, ents);
+      }
+    }
+
+    // Step 4: Assign X/Y positions
+    const pos = new Map();
+    let currentY = 20;
+
+    for (const layer of sortedLayers) {
+      const ents = layerGroups.get(layer);
+      let maxH = 0;
+      let currentX = 20;
+
+      for (const name of ents) {
+        const fields = this._getVisibleFields(name);
+        const h = entityHeight(fields.length);
+        maxH = Math.max(maxH, h);
+        pos.set(name, { x: currentX, y: currentY });
+        currentX += ENTITY_W + H_GAP;
+      }
+
+      currentY += maxH + V_GAP * 1.5; // extra gap for routing channels
+    }
+
+    // Step 5: Refinement — pull entities toward their neighbors' X centroid
+    for (let pass = 0; pass < 3; pass++) {
+      for (const layer of sortedLayers) {
+        const ents = layerGroups.get(layer);
+        for (const name of ents) {
+          const neighbors = this._adjacency.get(name) || new Set();
+          if (neighbors.size === 0) continue;
+          let sumX = 0, count = 0;
+          for (const nb of neighbors) {
+            const p = pos.get(nb);
+            if (p) { sumX += p.x; count++; }
+          }
+          if (count > 0) {
+            const p = pos.get(name);
+            p.x += (sumX / count - p.x) * 0.3;
+          }
+        }
+
+        // Resolve overlaps within layer
+        const sorted = ents.map(name => ({ name, x: pos.get(name).x })).sort((a, b) => a.x - b.x);
+        for (let i = 1; i < sorted.length; i++) {
+          const prev = sorted[i - 1];
+          const curr = sorted[i];
+          const minGap = ENTITY_W + 40;
+          if (curr.x - prev.x < minGap) {
+            const push = (minGap - (curr.x - prev.x)) / 2 + 2;
+            pos.get(prev.name).x -= push;
+            pos.get(curr.name).x += push;
+            // Update for next iteration
+            sorted[i - 1].x = pos.get(prev.name).x;
+            sorted[i].x = pos.get(curr.name).x;
+          }
+        }
+      }
+    }
+
+    // Translate so minimum x,y is at (20, 20)
+    let minX = Infinity, minY = Infinity;
+    for (const p of pos.values()) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); }
+    for (const p of pos.values()) { p.x -= minX - 20; p.y -= minY - 20; }
+
+    this._positions = pos;
+  }
+
+  // -------------------------------------------------------------------------
   // Render ERD
   // -------------------------------------------------------------------------
 
@@ -1005,7 +1247,10 @@ export default class ErdViewer {
 
     // Compute layout
     if (!skipLayout) {
-      if (this._layoutMode === 'force') {
+      if (this._layoutMode === 'hierarchy') {
+        this._buildAdjacency(); // needed for refinement pass
+        this._computeHierarchyLayout();
+      } else if (this._layoutMode === 'force') {
         this._computeForceLayout();
       } else {
         this._computeGridLayout();
@@ -1050,15 +1295,34 @@ export default class ErdViewer {
     this._buildWaypointGraph();
     this._isDragging = false;
 
-    // Draw arrows first (behind entities)
-    const arrowGroup = svgEl('g', { class: 'erd-arrows' });
+    // Phase 1: Compute all arrow paths
+    const arrowPaths = new Map(); // schemaName → { rel, from, to, d, fx, fy, tx, ty, points }
     for (const rel of this._relationships) {
       const from = this._positions.get(rel.sourceEntity);
       const to = this._positions.get(rel.targetEntity);
       if (!from || !to) continue;
       if (!this._visibleEntities.has(rel.sourceEntity) || !this._visibleEntities.has(rel.targetEntity)) continue;
+      const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
-      arrowGroup.appendChild(this._drawArrow(rel, from, to, laneOffset));
+      let d;
+      if (this._routingMode === 'orthogonal') {
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+      } else {
+        const midX = (fx + tx) / 2;
+        d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+      }
+      arrowPaths.set(rel.schemaName, { rel, d, fx, fy, tx, ty });
+    }
+
+    // Phase 2: Separate shared segments (post-routing nudge for overlapping paths)
+    if (this._routingMode === 'orthogonal') {
+      this._separateSharedSegments(arrowPaths);
+    }
+
+    // Phase 3: Draw arrows from computed paths
+    const arrowGroup = svgEl('g', { class: 'erd-arrows' });
+    for (const [, entry] of arrowPaths) {
+      arrowGroup.appendChild(this._drawArrowFromPath(entry));
     }
     this._svgRoot.appendChild(arrowGroup);
 
@@ -1448,6 +1712,210 @@ export default class ErdViewer {
     return g;
   }
 
+  /** Draw an arrow from a pre-computed path entry { rel, d, fx, fy, tx, ty }. */
+  _drawArrowFromPath({ rel, d, fx, fy, tx, ty }) {
+    let markerStart, markerEnd, cssClass;
+    if (rel.type === '1:N') {
+      markerStart = 'url(#cf-one-one)';
+      markerEnd = 'url(#cf-many)';
+      cssClass = 'erd-arrow';
+    } else if (rel.type === 'N:N') {
+      markerStart = 'url(#cf-many)';
+      markerEnd = 'url(#cf-many)';
+      cssClass = 'erd-arrow erd-arrow-nn';
+    } else {
+      markerStart = '';
+      markerEnd = 'url(#arrow-end)';
+      cssClass = 'erd-arrow';
+    }
+
+    const g = svgEl('g', {
+      class: 'erd-arrow-group',
+      'data-source': rel.sourceEntity,
+      'data-target': rel.targetEntity,
+      'data-schema': rel.schemaName,
+    });
+
+    const tooltipParts = [rel.schemaName];
+    if (rel.sourceEntity && rel.targetEntity) {
+      tooltipParts.push(`${rel.sourceEntity} \u2192 ${rel.targetEntity}`);
+    }
+    tooltipParts.push(`Type: ${rel.type}`);
+    if (rel.intersectEntity) tooltipParts.push(`Intersect: ${rel.intersectEntity}`);
+    if (rel.sourceAttribute) tooltipParts.push(`on: ${rel.sourceAttribute}`);
+
+    const title = svgEl('title');
+    title.textContent = tooltipParts.filter(Boolean).join('\n');
+    g.appendChild(title);
+
+    const pathAttrs = { d, class: cssClass, fill: 'none' };
+    if (markerStart) pathAttrs['marker-start'] = markerStart;
+    if (markerEnd) pathAttrs['marker-end'] = markerEnd;
+    g.appendChild(svgEl('path', pathAttrs));
+
+    g.appendChild(svgEl('circle', { cx: fx, cy: fy, r: 3, class: 'erd-connection-dot' }));
+    g.appendChild(svgEl('circle', { cx: tx, cy: ty, r: 3, class: 'erd-connection-dot' }));
+
+    return g;
+  }
+
+  /**
+   * Post-routing pass: detect segments shared between different arrows and nudge them apart.
+   * Operates on the SVG path string 'd' in each arrowPaths entry.
+   */
+  _separateSharedSegments(arrowPaths) {
+    const LANE_STEP = 6;
+    const TOLERANCE = 2; // px tolerance for "same line"
+
+    // Parse SVG path 'd' strings into segment arrays for analysis
+    // We only care about H/V segments in orthogonal paths
+    const segData = []; // { schema, isH, coord, min, max }
+
+    for (const [schema, entry] of arrowPaths) {
+      // Extract line segments from the SVG path
+      const segs = this._extractSegmentsFromPath(entry.d);
+      for (const seg of segs) {
+        seg.schema = schema;
+        segData.push(seg);
+      }
+    }
+
+    // Group horizontal segments by Y coordinate (within tolerance)
+    // Group vertical segments by X coordinate (within tolerance)
+    const hGroups = this._groupSegments(segData.filter(s => s.isH), 'coord', TOLERANCE);
+    const vGroups = this._groupSegments(segData.filter(s => !s.isH), 'coord', TOLERANCE);
+
+    // For each group with >1 segment from different arrows, compute overlap and assign offsets
+    const offsets = new Map(); // schema → cumulative offset { dx, dy }
+
+    for (const group of [...hGroups, ...vGroups]) {
+      // Filter to segments that actually overlap in their span
+      const overlapping = this._findOverlappingInGroup(group);
+      if (overlapping.length <= 1) continue;
+
+      // Only separate segments from different schemas
+      const uniqueSchemas = new Set(overlapping.map(s => s.schema));
+      if (uniqueSchemas.size <= 1) continue;
+
+      const isH = overlapping[0].isH;
+      const schemas = [...uniqueSchemas];
+      const half = (schemas.length - 1) / 2;
+      schemas.forEach((schema, i) => {
+        const offset = (i - half) * LANE_STEP;
+        if (Math.abs(offset) < 0.1) return;
+        if (!offsets.has(schema)) offsets.set(schema, { dx: 0, dy: 0 });
+        const o = offsets.get(schema);
+        if (isH) o.dy += offset; // horizontal segment → nudge in Y
+        else o.dx += offset;     // vertical segment → nudge in X
+      });
+    }
+
+    // Apply computed offsets by shifting the SVG path
+    for (const [schema, { dx, dy }] of offsets) {
+      if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) continue;
+      const entry = arrowPaths.get(schema);
+      if (!entry) continue;
+      // Shift the path by translating intermediate coordinates
+      entry.d = this._shiftPathString(entry.d, dx, dy);
+    }
+  }
+
+  /** Extract H/V segments from an SVG path string. */
+  _extractSegmentsFromPath(d) {
+    const segs = [];
+    // Parse M, L, H, V commands and collect axis-aligned segments
+    const coords = [];
+    const parts = d.match(/[MLHVQC][^MLHVQC]*/gi) || [];
+    let cx = 0, cy = 0;
+    for (const part of parts) {
+      const cmd = part[0].toUpperCase();
+      const nums = part.slice(1).trim().split(/[\s,]+/).map(Number);
+      if (cmd === 'M' || cmd === 'L') {
+        cx = nums[0]; cy = nums[1];
+        coords.push({ x: cx, y: cy });
+      } else if (cmd === 'H') {
+        cx = nums[0];
+        coords.push({ x: cx, y: cy });
+      } else if (cmd === 'V') {
+        cy = nums[0];
+        coords.push({ x: cx, y: cy });
+      } else if (cmd === 'Q') {
+        // Quadratic bezier — just use end point
+        cx = nums[2]; cy = nums[3];
+        coords.push({ x: cx, y: cy });
+      } else if (cmd === 'C') {
+        cx = nums[4]; cy = nums[5];
+        coords.push({ x: cx, y: cy });
+      }
+    }
+    // Build segments from consecutive coordinate pairs
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i], b = coords[i + 1];
+      const dx = Math.abs(b.x - a.x), dy = Math.abs(b.y - a.y);
+      if (dx < 1 && dy >= 1) {
+        // Vertical segment
+        segs.push({ isH: false, coord: a.x, min: Math.min(a.y, b.y), max: Math.max(a.y, b.y) });
+      } else if (dy < 1 && dx >= 1) {
+        // Horizontal segment
+        segs.push({ isH: true, coord: a.y, min: Math.min(a.x, b.x), max: Math.max(a.x, b.x) });
+      }
+    }
+    return segs;
+  }
+
+  /** Group segments that are on the same line (within tolerance). */
+  _groupSegments(segs, key, tolerance) {
+    if (segs.length === 0) return [];
+    const sorted = [...segs].sort((a, b) => a[key] - b[key]);
+    const groups = [[sorted[0]]];
+    for (let i = 1; i < sorted.length; i++) {
+      if (Math.abs(sorted[i][key] - sorted[i - 1][key]) <= tolerance) {
+        groups[groups.length - 1].push(sorted[i]);
+      } else {
+        groups.push([sorted[i]]);
+      }
+    }
+    return groups;
+  }
+
+  /** Within a group of same-line segments, find those that overlap in their span. */
+  _findOverlappingInGroup(group) {
+    // Simple: return all segments that overlap with at least one other
+    const result = [];
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i], b = group[j];
+        if (a.max > b.min + 1 && b.max > a.min + 1) {
+          if (!result.includes(a)) result.push(a);
+          if (!result.includes(b)) result.push(b);
+        }
+      }
+    }
+    return result;
+  }
+
+  /** Shift an SVG path string by (dx, dy) on intermediate points. */
+  _shiftPathString(d, dx, dy) {
+    // Simple approach: adjust all numeric coordinates
+    // We only shift H coordinates by dx and V coordinates by dy
+    // For M, L, Q, C we shift both
+    const parts = d.match(/[MLHVQC][^MLHVQC]*/gi) || [];
+    const shifted = parts.map((part, idx) => {
+      const cmd = part[0].toUpperCase();
+      const nums = part.slice(1).trim().split(/[\s,]+/).map(Number);
+      // Don't shift first M (start point) or last coordinate pair (end point)
+      if (idx === 0) return part; // keep start
+      if (idx === parts.length - 1) return part; // keep end
+      if (cmd === 'H') return `H ${nums[0] + dx}`;
+      if (cmd === 'V') return `V ${nums[0] + dy}`;
+      if (cmd === 'M' || cmd === 'L') return `${cmd} ${nums[0] + dx} ${nums[1] + dy}`;
+      if (cmd === 'Q') return `Q ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy}`;
+      if (cmd === 'C') return `C ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy} ${nums[4] + dx} ${nums[5] + dy}`;
+      return part;
+    });
+    return shifted.join(' ');
+  }
+
   // -------------------------------------------------------------------------
   // Port offset computation: distribute arrows along entity sides
   // -------------------------------------------------------------------------
@@ -1582,10 +2050,27 @@ export default class ErdViewer {
     }
     points.push({ x: tx, y: ty });
 
-    // Apply lane offset by shifting all intermediate points
+    // Apply lane offset per-segment: shift perpendicular to each segment's direction
     if (laneOffset !== 0) {
       for (let i = 1; i < points.length - 1; i++) {
-        points[i] = { x: points[i].x + laneOffset, y: points[i].y + laneOffset };
+        const prev = points[i - 1];
+        const curr = points[i];
+        const next = points[i + 1];
+        // Determine dominant segment direction at this point
+        const dxIn = curr.x - prev.x, dyIn = curr.y - prev.y;
+        const dxOut = next.x - curr.x, dyOut = next.y - curr.y;
+        const isHIn = Math.abs(dxIn) > Math.abs(dyIn);
+        const isHOut = Math.abs(dxOut) > Math.abs(dyOut);
+        if (isHIn && isHOut) {
+          // Both segments horizontal → offset in Y
+          points[i] = { x: curr.x, y: curr.y + laneOffset };
+        } else if (!isHIn && !isHOut) {
+          // Both segments vertical → offset in X
+          points[i] = { x: curr.x + laneOffset, y: curr.y };
+        } else {
+          // Corner point: offset both axes to keep corner aligned
+          points[i] = { x: curr.x + laneOffset, y: curr.y + laneOffset };
+        }
       }
     }
 
@@ -1634,13 +2119,104 @@ export default class ErdViewer {
     this._routeObstacles = [];
     this._routeWaypoints = [];
 
+    const xCoords = new Set();
+    const yCoords = new Set();
+
     for (const bb of this._entityBBoxes) {
       const x1 = bb.x - margin;
       const y1 = bb.y - margin;
       const x2 = bb.x + bb.w + margin;
       const y2 = bb.y + bb.h + margin;
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
       this._routeObstacles.push({ x1, y1, x2, y2, name: bb.name });
+
+      // Corner waypoints (existing)
       this._routeWaypoints.push({ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 });
+      // Edge midpoint waypoints (new)
+      this._routeWaypoints.push({ x: mx, y: y1 }, { x: mx, y: y2 }, { x: x1, y: my }, { x: x2, y: my });
+
+      for (const x of [x1, x2, mx]) xCoords.add(Math.round(x * 100) / 100);
+      for (const y of [y1, y2, my]) yCoords.add(Math.round(y * 100) / 100);
+    }
+
+    // Grid intersection waypoints (only for manageable entity counts)
+    if (this._entityBBoxes.length <= 80) {
+      const xs = [...xCoords].sort((a, b) => a - b);
+      const ys = [...yCoords].sort((a, b) => a - b);
+      for (const x of xs) {
+        for (const y of ys) {
+          if (!this._pointInsideObstacle(x, y)) {
+            this._routeWaypoints.push({ x, y });
+          }
+        }
+      }
+    }
+
+    // Deduplicate waypoints (quantize to 0.5px)
+    const seen = new Set();
+    this._routeWaypoints = this._routeWaypoints.filter(wp => {
+      const key = `${Math.round(wp.x * 2)}:${Math.round(wp.y * 2)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      // Also reject waypoints inside obstacles
+      return !this._pointInsideObstacle(wp.x, wp.y);
+    });
+
+    this._buildWaypointAdjacency();
+  }
+
+  /** Check if a point lies strictly inside any obstacle box. */
+  _pointInsideObstacle(x, y) {
+    for (const obs of this._routeObstacles) {
+      if (x > obs.x1 && x < obs.x2 && y > obs.y1 && y < obs.y2) return true;
+    }
+    return false;
+  }
+
+  /** Pre-compute adjacency list: connect waypoints that share an axis and have clear line-of-sight. */
+  _buildWaypointAdjacency() {
+    const wps = this._routeWaypoints;
+    const n = wps.length;
+    this._wpAdj = new Array(n).fill(null).map(() => []);
+    const emptyExclude = new Set();
+
+    // Group by same X coordinate → vertical connections
+    const byX = new Map();
+    wps.forEach((wp, i) => {
+      const key = Math.round(wp.x * 2); // quantize to 0.5px
+      if (!byX.has(key)) byX.set(key, []);
+      byX.get(key).push(i);
+    });
+    for (const group of byX.values()) {
+      group.sort((a, b) => wps[a].y - wps[b].y);
+      for (let i = 0; i < group.length - 1; i++) {
+        const ai = group[i], bi = group[i + 1];
+        const a = wps[ai], b = wps[bi];
+        if (!this._segmentHitsObstacle(a.x, a.y, b.x, b.y, emptyExclude)) {
+          this._wpAdj[ai].push(bi);
+          this._wpAdj[bi].push(ai);
+        }
+      }
+    }
+
+    // Group by same Y coordinate → horizontal connections
+    const byY = new Map();
+    wps.forEach((wp, i) => {
+      const key = Math.round(wp.y * 2);
+      if (!byY.has(key)) byY.set(key, []);
+      byY.get(key).push(i);
+    });
+    for (const group of byY.values()) {
+      group.sort((a, b) => wps[a].x - wps[b].x);
+      for (let i = 0; i < group.length - 1; i++) {
+        const ai = group[i], bi = group[i + 1];
+        const a = wps[ai], b = wps[bi];
+        if (!this._segmentHitsObstacle(a.x, a.y, b.x, b.y, emptyExclude)) {
+          this._wpAdj[ai].push(bi);
+          this._wpAdj[bi].push(ai);
+        }
+      }
     }
   }
 
@@ -1675,72 +2251,91 @@ export default class ErdViewer {
       return [{ x: fx, y: fy }, { x: tx, y: ty }];
     }
 
-    // Build node list: source + target + all waypoints
-    const nodes = [{ x: fx, y: fy }];
-    for (const wp of this._routeWaypoints) nodes.push(wp);
-    nodes.push({ x: tx, y: ty });
+    // Quick check: L-path (no waypoints needed)
+    if (!this._segmentHitsObstacle(fx, fy, tx, fy, excludeNames) &&
+        !this._segmentHitsObstacle(tx, fy, tx, ty, excludeNames)) {
+      return [{ x: fx, y: fy }, { x: tx, y: fy }, { x: tx, y: ty }];
+    }
+    if (!this._segmentHitsObstacle(fx, fy, fx, ty, excludeNames) &&
+        !this._segmentHitsObstacle(fx, ty, tx, ty, excludeNames)) {
+      return [{ x: fx, y: fy }, { x: fx, y: ty }, { x: tx, y: ty }];
+    }
 
+    // Build node list: source (0) + waypoints + target (last)
+    const wps = this._routeWaypoints;
+    const totalNodes = wps.length + 2;
     const srcIdx = 0;
-    const tgtIdx = nodes.length - 1;
-    const n = nodes.length;
+    const tgtIdx = totalNodes - 1;
 
-    // Check if two nodes can be connected with 1 or 2 axis-aligned segments
-    const canReach = (ai, bi) => {
-      const a = nodes[ai], b = nodes[bi];
-      // Direct H
-      if (Math.abs(a.y - b.y) < 1 && !this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames)) return true;
-      // Direct V
-      if (Math.abs(a.x - b.x) < 1 && !this._segmentHitsObstacle(a.x, a.y, a.x, b.y, excludeNames)) return true;
-      // L-path: H then V
-      if (!this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames) &&
-          !this._segmentHitsObstacle(b.x, a.y, b.x, b.y, excludeNames)) return true;
-      // L-path: V then H
-      if (!this._segmentHitsObstacle(a.x, a.y, a.x, b.y, excludeNames) &&
-          !this._segmentHitsObstacle(a.x, b.y, b.x, b.y, excludeNames)) return true;
-      return false;
+    // Node coordinates: index → {x, y}
+    const nodeX = new Float64Array(totalNodes);
+    const nodeY = new Float64Array(totalNodes);
+    nodeX[srcIdx] = fx; nodeY[srcIdx] = fy;
+    for (let i = 0; i < wps.length; i++) {
+      nodeX[i + 1] = wps[i].x;
+      nodeY[i + 1] = wps[i].y;
+    }
+    nodeX[tgtIdx] = tx; nodeY[tgtIdx] = ty;
+
+    // Build temporary adjacency for start and end by connecting them to visible waypoints
+    const tempAdj = new Array(totalNodes);
+    // Copy pre-computed adjacency (shifted by +1)
+    for (let i = 0; i < wps.length; i++) {
+      tempAdj[i + 1] = this._wpAdj[i].map(j => j + 1);
+    }
+    tempAdj[srcIdx] = [];
+    tempAdj[tgtIdx] = [];
+
+    // Connect start/end to reachable waypoints (same axis, clear line-of-sight)
+    for (let i = 0; i < wps.length; i++) {
+      const wi = i + 1;
+      // Source connections
+      if ((Math.abs(nodeY[srcIdx] - nodeY[wi]) < 1 || Math.abs(nodeX[srcIdx] - nodeX[wi]) < 1) &&
+          !this._segmentHitsObstacle(nodeX[srcIdx], nodeY[srcIdx], nodeX[wi], nodeY[wi], excludeNames)) {
+        tempAdj[srcIdx].push(wi);
+        tempAdj[wi] = [...tempAdj[wi], srcIdx];
+      }
+      // Target connections
+      if ((Math.abs(nodeY[tgtIdx] - nodeY[wi]) < 1 || Math.abs(nodeX[tgtIdx] - nodeX[wi]) < 1) &&
+          !this._segmentHitsObstacle(nodeX[tgtIdx], nodeY[tgtIdx], nodeX[wi], nodeY[wi], excludeNames)) {
+        tempAdj[tgtIdx].push(wi);
+        tempAdj[wi] = [...tempAdj[wi], tgtIdx];
+      }
+    }
+
+    // Also check direct src→tgt on adjacency (already handled above via quick checks, but cover shifted coords)
+
+    // Direction helper for bend detection
+    const getDir = (ai, bi) => {
+      if (Math.abs(nodeX[bi] - nodeX[ai]) > Math.abs(nodeY[bi] - nodeY[ai])) return 0; // H
+      return 1; // V
     };
 
-    // Direction of approach for bend detection
-    const getDir = (a, b) => {
-      if (Math.abs(b.x - a.x) > Math.abs(b.y - a.y)) return 'H';
-      return 'V';
-    };
-
-    // A* with Manhattan distance heuristic
-    const dist = new Float64Array(n).fill(Infinity);
-    const prev = new Int32Array(n).fill(-1);
-    const closed = new Uint8Array(n);
+    // A* with binary min-heap
+    const dist = new Float64Array(totalNodes).fill(Infinity);
+    const prev = new Int32Array(totalNodes).fill(-1);
+    const closed = new Uint8Array(totalNodes);
     dist[srcIdx] = 0;
 
-    // Simple priority queue (binary heap would be better but N is small)
-    const open = [{ idx: srcIdx, f: 0 }];
+    const heap = new MinHeap();
+    heap.push({ idx: srcIdx, f: 0 });
 
-    const manhattan = (i) => Math.abs(nodes[i].x - tx) + Math.abs(nodes[i].y - ty);
-
-    while (open.length > 0) {
-      // Find min-f in open set
-      let bestPos = 0;
-      for (let i = 1; i < open.length; i++) {
-        if (open[i].f < open[bestPos].f) bestPos = i;
-      }
-      const cur = open[bestPos];
-      open[bestPos] = open[open.length - 1];
-      open.pop();
-
+    while (heap.size > 0) {
+      const cur = heap.pop();
       if (cur.idx === tgtIdx) break;
       if (closed[cur.idx]) continue;
       closed[cur.idx] = 1;
 
-      for (let ni = 0; ni < n; ni++) {
-        if (ni === cur.idx || closed[ni]) continue;
-        if (!canReach(cur.idx, ni)) continue;
+      const neighbors = tempAdj[cur.idx];
+      if (!neighbors) continue;
+      for (const ni of neighbors) {
+        if (closed[ni]) continue;
 
-        const a = nodes[cur.idx], b = nodes[ni];
-        let cost = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+        let cost = Math.abs(nodeX[ni] - nodeX[cur.idx]) + Math.abs(nodeY[ni] - nodeY[cur.idx]);
         // Bend penalty
         if (prev[cur.idx] >= 0) {
-          const prevDir = getDir(nodes[prev[cur.idx]], a);
-          const curDir = getDir(a, b);
+          const prevDir = getDir(prev[cur.idx], cur.idx);
+          const curDir = getDir(cur.idx, ni);
           if (prevDir !== curDir) cost += ErdViewer.BEND_PENALTY;
         }
 
@@ -1748,42 +2343,45 @@ export default class ErdViewer {
         if (newDist < dist[ni]) {
           dist[ni] = newDist;
           prev[ni] = cur.idx;
-          open.push({ idx: ni, f: newDist + manhattan(ni) });
+          const h = Math.abs(nodeX[ni] - tx) + Math.abs(nodeY[ni] - ty);
+          heap.push({ idx: ni, f: newDist + h });
         }
       }
     }
 
     // Reconstruct path
     if (prev[tgtIdx] === -1 && srcIdx !== tgtIdx) {
-      // No path found — fallback to direct line
-      return [{ x: fx, y: fy }, { x: tx, y: ty }];
+      // No A* path found → detour around all entities via diagram edge
+      return this._computeDetourPath(fx, fy, tx, ty);
     }
 
     const path = [];
     let ci = tgtIdx;
     while (ci >= 0) {
-      path.unshift(nodes[ci]);
+      path.unshift({ x: nodeX[ci], y: nodeY[ci] });
       ci = prev[ci];
     }
 
-    // Expand L-shaped connections into orthogonal waypoints
-    const expanded = [path[0]];
-    for (let i = 1; i < path.length; i++) {
-      const a = expanded[expanded.length - 1];
-      const b = path[i];
-      if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) {
-        // Not axis-aligned → insert a corner point (H then V, or V then H)
-        if (!this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames) &&
-            !this._segmentHitsObstacle(b.x, a.y, b.x, b.y, excludeNames)) {
-          expanded.push({ x: b.x, y: a.y });
-        } else {
-          expanded.push({ x: a.x, y: b.y });
-        }
-      }
-      expanded.push(b);
-    }
+    return path;
+  }
 
-    return expanded;
+  /** Fallback detour path that routes around all entities via the diagram edge. */
+  _computeDetourPath(fx, fy, tx, ty) {
+    // Find the bounding box of all obstacles
+    let minY = Infinity, maxX = -Infinity;
+    for (const obs of this._routeObstacles) {
+      if (obs.y1 < minY) minY = obs.y1;
+      if (obs.x2 > maxX) maxX = obs.x2;
+    }
+    const detourX = maxX + 40;
+    const detourY = Math.min(minY - 40, Math.min(fy, ty) - 60);
+    return [
+      { x: fx, y: fy },
+      { x: fx, y: detourY },
+      { x: detourX, y: detourY },
+      { x: detourX, y: ty },
+      { x: tx, y: ty },
+    ];
   }
 
   /** Convert waypoint array to SVG path with rounded corners. */

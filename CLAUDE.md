@@ -92,6 +92,8 @@ All results are TTL-cached (default 1 hour). Cache is keyed per method+args.
 | `API_REQUEST` | `{ method, url, headers, body }` | `{ ok, status, data, error, headers }` |
 | `GET_ENV` | — | `{ url, orgName, apiVersion }` |
 | `CLEAR_CACHE` | — | — |
+| `EXTERNAL_REQUEST` | `{ url, method, headers, body }` | `{ ok, status, data }` — for AI provider calls |
+| `FORM_INSPECT` | `{ action, params }` | `{ data }` — Xrm.Page operations via page context |
 
 ---
 
@@ -128,7 +130,8 @@ All results are TTL-cached (default 1 hour). Cache is keyed per method+args.
 | **Security** | Role matrix uses `RetrieveRolePrivilegesRole`. User permissions use `RetrieveUserPrivileges`. Field security uses direct nav prop on systemuser. |
 | **ERD** | Solution → solutioncomponents → entities. Export Schema = JSON Schema draft-07. |
 | **Tools** | Agent Tool Builder. Entity cards → JSON Schema tool definitions (Claude/OpenAI). 1:N children as deep insert array properties. Output: Tool Schema, Deep Insert template, API info. |
-| **Settings** | Persisted to `chrome.storage.local`. Theme applies immediately; no page reload needed. |
+| **AI** | AI Customizer (BYOK: OpenAI/Azure/Anthropic). Chat-based conversational UI. Multi-turn agent loop with metadata tool calls. Modify + create saved queries (views) via natural language. Stateful context — follow-up prompts build on previous applies. Debug console with full request/response logging. |
+| **Settings** | Persisted to `chrome.storage.local`. Theme applies immediately; no page reload needed. AI provider settings (endpoint, API key, model) stored locally. |
 
 ---
 

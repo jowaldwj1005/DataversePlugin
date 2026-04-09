@@ -1908,6 +1908,35 @@
 .bulk-json-textarea:focus { outline: none; border-color: var(--color-accent-primary); box-shadow: 0 0 0 1px var(--color-border-focus); }
 .bulk-json-error { font-size: 0.78rem; color: var(--color-error); margin: 4px 0; }
 .bulk-json-actions { display: flex; gap: 6px; margin-top: 6px; }
+.bulk-json-agent-prompt { position: relative; margin-bottom: 6px; }
+.bulk-json-agent-prompt-pre {
+  font-size: 0.72rem;
+  font-family: Consolas, monospace;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 8px 8px 8px;
+  padding-top: 28px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--color-text-muted);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.bulk-json-agent-copy-btn {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  z-index: 1;
+}
+.bulk-json-agent-copy-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 /* --- Buttons (full system) ------------------------------------------- */
 .bulk-btn {

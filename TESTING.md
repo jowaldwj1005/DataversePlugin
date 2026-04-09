@@ -116,15 +116,92 @@ Run against a real Dynamics 365 / Power Platform environment.
 
 ---
 
-## 8. Settings
+## 8. AI Customizer
+
+### Prerequisites
+Configure AI provider in Settings: Provider, Endpoint URL, API Key, Model.
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 8.1 | Change theme to Light → Save | Theme applies immediately; status bar visible |
-| 8.2 | Reload extension, reopen side panel | Light theme still active (persisted to `chrome.storage.local`) |
-| 8.3 | Change cache TTL to 1 minute → Save → go to Explorer | After 1 minute, entity list reloads from API (not cache) |
-| 8.4 | Clear Metadata Cache | Toast: "Metadata cache cleared" |
-| 8.5 | Reset to Defaults | Settings revert to dark theme, 60-minute TTL, page size 50 |
+| 8.1 | Open AI tab without config | "Configure your AI provider in Settings" message |
+| 8.2 | Configure Azure OpenAI in Settings → switch to AI tab | Entity search, Type/View dropdowns, status dot shows "azure · model" |
+| 8.3 | Search entity "account" | Dropdown shows matching entities, click selects |
+| 8.4 | Select a system view | Debug console logs "[META] View selected" with XML details |
+
+### View Modification
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.5 | Prompt: "add email, phone, and owner columns" → Send | Agent timeline: Analyzed → Generated → Validated. Diff shows +lines |
+| 8.6 | Check diff: fetchxml has real attribute names, no `*name` suffixes | Correct: `<attribute name="ownerid"/>`, NOT `owneridname` |
+| 8.7 | Check diff: layoutxml cells for lookups use attribute name as-is | Correct: `<cell name="ownerid"/>`, NOT `<cell name="owneridname"/>` |
+| 8.8 | Check diff: statecodename/statuscodename are the only `*name` cells | Only exception for state/status fields |
+| 8.9 | Click "Apply & Publish" | Status: "✓ Applied & Published". Diff collapses. Debug console shows PATCH → Publish → Verify |
+| 8.10 | Hard-reload D365 page (Ctrl+Shift+R) | View shows new columns with data |
+
+### Stateful Follow-up
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.11 | After 8.9, prompt: "add createdby too" | Agent uses UPDATED view as baseline (includes changes from 8.9) |
+| 8.12 | Diff shows only +1 (createdby), not re-adding previous columns | Previous columns preserved in baseline |
+| 8.13 | Apply & Publish → hard-reload | Both sets of changes visible |
+
+### Link-Entity (Related Entity Fields)
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.14 | Prompt: "show the thread's status and agent" (on entity with lookup) | Agent requests related entity metadata → timeline shows tool call |
+| 8.15 | Check fetchxml: link-entity has `alias="a_<hex>"`, `visible="false"` | Correct alias format and attributes |
+| 8.16 | Check layoutxml: link-entity cells use `alias.attributename`, NO `*name` suffix | Correct: `a_xxx.jw_status`, NOT `a_xxx.jw_statusname` |
+| 8.17 | Check: no nested link-entities | All link-entities are direct children of `<entity>` |
+
+### Agent Questions
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.18 | Prompt: "optimize this view" | Agent may ask a clarifying question in the timeline |
+| 8.19 | Answer the question via inline input → press Enter | Agent continues, generates XML based on answer |
+
+### New View Creation
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.20 | Click "+New" next to view dropdown | Name input appears, view dropdown hides |
+| 8.21 | Enter name, prompt: "create a view with all important fields" | Agent generates full view XML from blank baseline |
+| 8.22 | Apply & Publish → hard-reload | New view appears in D365 view selector |
+
+### Validation
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.23 | If AI generates `*name` attribute in fetchxml | Validation blocks Apply with error message |
+| 8.24 | If AI generates duplicate cells in layoutxml | Validation blocks Apply with error message |
+| 8.25 | If AI generates nested link-entity | Validation blocks Apply with error message |
+
+### Debug Console
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.26 | Expand debug console (click header) | Shows [META], [SEND], [RECV] entries with timestamps |
+| 8.27 | Click ▶ on a [SEND] entry | Expands to show full request payload |
+| 8.28 | Filter buttons: Prompts / API / Errors | Filters log entries by tag |
+| 8.29 | "System Prompt" button → edit → "Use Custom" | Next request uses custom prompt |
+| 8.30 | Clear button | Clears log, timeline, and aborts running agent |
+
+---
+
+## 9. Settings
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 9.1 | Change theme to Light → Save | Theme applies immediately; status bar visible |
+| 9.2 | Reload extension, reopen side panel | Light theme still active (persisted to `chrome.storage.local`) |
+| 9.3 | Change cache TTL to 1 minute → Save → go to Explorer | After 1 minute, entity list reloads from API (not cache) |
+| 9.4 | Clear Metadata Cache | Toast: "Metadata cache cleared" |
+| 9.5 | Reset to Defaults | Settings revert to dark theme, 60-minute TTL, page size 50 |
+| 9.6 | Configure AI Provider (Azure OpenAI) → Save | Endpoint preview shows resulting URL. Settings persisted. |
+| 9.7 | Configure AI Provider (Anthropic) → Save | Endpoint preview shows `/messages` URL with `x-api-key` header |
 
 ---
 

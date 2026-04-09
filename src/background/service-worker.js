@@ -18,6 +18,8 @@ const MESSAGE_TYPES = Object.freeze({
   CLEAR_CACHE: 'CLEAR_CACHE',
   GET_METADATA_CACHE: 'GET_METADATA_CACHE',
   SET_METADATA_CACHE: 'SET_METADATA_CACHE',
+  EXTERNAL_REQUEST: 'EXTERNAL_REQUEST',
+  FORM_INSPECT: 'FORM_INSPECT',
 });
 
 const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -366,6 +368,50 @@ async function handleMessage(message, sender) {
       if (!env) return { success: false, error: 'No active environment' };
       await clearMetadataCache(env);
       return { success: true };
+    }
+
+    // -- External API proxy (AI providers) ----------------------------------
+    case MESSAGE_TYPES.EXTERNAL_REQUEST: {
+      try {
+        const { url, method = 'POST', headers = {}, body } = payload;
+        const resp = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await resp.json();
+        return { success: true, ok: resp.ok, status: resp.status, data };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    // -- Form inspect (Xrm.Page operations via page context) ----------------
+    case MESSAGE_TYPES.FORM_INSPECT: {
+      try {
+        const tabId = await findDynamicsTab();
+        if (!tabId) throw new Error('No Dynamics 365 tab found. Open a Dynamics 365 page first.');
+
+        let result;
+        try {
+          result = await sendMessageToTab(tabId, { type: 'FORM_INSPECT_VIA_PAGE', payload });
+        } catch (err) {
+          const msg = err.message || '';
+          if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
+            await injectContentScripts(tabId);
+            result = await sendMessageToTab(tabId, { type: 'FORM_INSPECT_VIA_PAGE', payload });
+          } else {
+            throw err;
+          }
+        }
+
+        if (!result || !result.success) {
+          return { success: false, error: result?.error ?? 'Form inspect request failed' };
+        }
+        return result;
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
 
     default:

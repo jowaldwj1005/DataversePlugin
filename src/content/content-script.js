@@ -88,6 +88,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true; // keep channel open for async
   }
+  // Form inspect: proxy Xrm.Page operations through the page context
+  if (message.type === 'FORM_INSPECT_VIA_PAGE') {
+    proxyFormInspectViaPage(message.payload)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
   return false;
 });
 
@@ -124,6 +131,40 @@ function proxyRequestViaPage(reqDef) {
       window.removeEventListener('message', onResponse);
       resolve({ success: false, error: 'Page proxy request timed out' });
     }, 60000);
+  });
+}
+
+/**
+ * Proxy a FORM_INSPECT request through the page context for Xrm.Page access.
+ * Mirrors proxyRequestViaPage but uses FORM_INSPECT message types.
+ */
+function proxyFormInspectViaPage(payload) {
+  return new Promise((resolve) => {
+    const requestId = `fi_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    function onResponse(event) {
+      if (event.source !== window) return;
+      if (event.data?.source !== MESSAGE_SOURCE) return;
+      if (event.data?.type !== 'FORM_INSPECT_RESPONSE') return;
+      if (event.data?.requestId !== requestId) return;
+
+      window.removeEventListener('message', onResponse);
+      resolve(event.data.result);
+    }
+    window.addEventListener('message', onResponse);
+
+    window.postMessage({
+      source: CONTENT_SOURCE,
+      type: 'FORM_INSPECT',
+      requestId,
+      payload,
+    }, '*');
+
+    // 30s timeout — Xrm operations are local and fast
+    setTimeout(() => {
+      window.removeEventListener('message', onResponse);
+      resolve({ success: false, error: 'Form inspect request timed out' });
+    }, 30000);
   });
 }
 

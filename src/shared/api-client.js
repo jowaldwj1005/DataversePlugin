@@ -19,6 +19,8 @@ const MESSAGE_TYPES = Object.freeze({
   API_REQUEST: 'API_REQUEST',
   GET_ENV: 'GET_ENV',
   GET_TOKEN: 'GET_TOKEN',
+  EXTERNAL_REQUEST: 'EXTERNAL_REQUEST',
+  FORM_INSPECT: 'FORM_INSPECT',
 });
 
 // ---------------------------------------------------------------------------
@@ -260,6 +262,28 @@ export class DataverseClient {
       throw parseDataverseError(response.data, response.status);
     }
 
+    return response.data;
+  }
+
+  // -- External API (AI providers etc.) ------------------------------------
+
+  /**
+   * Send a request to an external (non-Dataverse) URL via the service worker.
+   * The service worker makes the fetch directly — no CORS restrictions.
+   * @param {string} url    Full URL
+   * @param {object} [options]
+   * @param {string} [options.method='POST']
+   * @param {object} [options.headers]
+   * @param {any}    [options.body]  Will be JSON-stringified by the service worker
+   * @returns {Promise<any>}  Parsed response data
+   */
+  async requestExternal(url, { method = 'POST', headers = {}, body } = {}) {
+    const response = await sendMessage(MESSAGE_TYPES.EXTERNAL_REQUEST, { url, method, headers, body });
+    if (!response.success) throw new Error(response.error || 'External request failed');
+    if (!response.ok) {
+      const msg = response.data?.error?.message || response.data?.error || `HTTP ${response.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
     return response.data;
   }
 
@@ -513,6 +537,28 @@ export class DataverseClient {
    */
   async whoAmI() {
     return this.request('GET', 'WhoAmI()');
+  }
+
+  // -- Form inspect (Xrm.Page operations via page context) ----------------
+
+  /**
+   * Send a FORM_INSPECT command to the active Dynamics 365 form.
+   * Proxied through service-worker → content-script → page-extractor (MAIN world).
+   * @param {string} action  Action identifier (getFormContext, getRecordData, etc.)
+   * @param {object} [params={}]  Action-specific parameters
+   * @returns {Promise<any>}  Action result data
+   */
+  async formInspect(action, params = {}) {
+    const response = await Promise.race([
+      sendMessage(MESSAGE_TYPES.FORM_INSPECT, { action, params }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(
+        'Form inspect timed out. Refresh the Dynamics 365 page and try again.',
+      )), 10000)),
+    ]);
+    if (!response.success) {
+      throw new Error(response.error || 'Form inspect request failed');
+    }
+    return response.data;
   }
 
   // -- Environment helper -------------------------------------------------

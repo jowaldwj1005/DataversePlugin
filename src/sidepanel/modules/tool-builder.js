@@ -185,7 +185,18 @@ export default class ToolBuilder {
       this._renderCards();
       this._syncOutput();
     } else {
-      this._canvas.innerHTML = `<div class="${CSS}-hint">Select an entity above to start building a tool definition.</div>`;
+      this._canvas.innerHTML = `<div class="${CSS}-guide">
+        <div class="${CSS}-guide-title">Agent Tool Builder</div>
+        <p>Generate JSON Schema tool definitions from your Dataverse entities — ready to paste into Claude, OpenAI, or MCP configs.</p>
+        <ol>
+          <li><b>Search &amp; select an entity</b> in the toolbar above</li>
+          <li><b>Choose the operation</b> — Create, Update, or Read</li>
+          <li><b>Check / uncheck columns</b> to include as tool parameters</li>
+          <li><b>Add 1:N child entities</b> for deep insert (Create mode)</li>
+          <li><b>Copy the output</b> from the panel below — Tool Schema, Deep Insert template, or API info</li>
+        </ol>
+        <p class="${CSS}-guide-note">Hover over column names to see field descriptions from metadata.</p>
+      </div>`;
     }
   }
 
@@ -232,7 +243,7 @@ export default class ToolBuilder {
       list.style.display = filtered.length ? '' : 'none';
     };
 
-    input.addEventListener('focus', () => renderList(input.value));
+    input.addEventListener('focus', () => { input.select(); renderList(''); });
     input.addEventListener('input', () => renderList(input.value));
     input.addEventListener('blur', () => setTimeout(() => list.style.display = 'none', 200));
 
@@ -391,9 +402,13 @@ export default class ToolBuilder {
         });
 
         const dn = attr.DisplayName?.UserLocalizedLabel?.Label || attr.LogicalName;
+        const desc = attr.Description?.UserLocalizedLabel?.Label;
+        row.dataset.label = dn.toLowerCase();
+
         const nameSpan = document.createElement('span');
         nameSpan.className = `${CSS}-col-name`;
         nameSpan.textContent = `${dn} (${attr.LogicalName})`;
+        nameSpan.title = desc ? `${dn}\n${desc}` : `${dn} (${attr.LogicalName})`;
 
         const typeBadge = document.createElement('span');
         typeBadge.className = `${CSS}-type-badge`;
@@ -416,7 +431,8 @@ export default class ToolBuilder {
       search.addEventListener('input', () => {
         const f = search.value.toLowerCase();
         list.querySelectorAll(`.${CSS}-col-item`).forEach(item => {
-          item.style.display = item.dataset.name.includes(f) ? '' : 'none';
+          const match = item.dataset.name.includes(f) || (item.dataset.label && item.dataset.label.includes(f));
+          item.style.display = match ? '' : 'none';
         });
       });
 
@@ -958,7 +974,7 @@ export default class ToolBuilder {
       }
       .${CSS}-entity-option {
         padding: 5px 10px; cursor: pointer; font-size: 0.78rem;
-        color: var(--color-text-primary);
+        color: var(--color-text-primary); background: var(--color-bg-primary);
       }
       .${CSS}-entity-option:hover { background: var(--color-bg-hover); }
 
@@ -985,6 +1001,28 @@ export default class ToolBuilder {
       .${CSS}-hint {
         color: var(--color-text-muted); font-size: 0.78rem;
         padding: 20px 0; width: 100%; text-align: center;
+      }
+
+      /* Guide */
+      .${CSS}-guide {
+        width: 100%; max-width: 420px; margin: 24px auto;
+        padding: 16px 20px; font-size: 0.78rem;
+        color: var(--color-text-secondary); line-height: 1.6;
+        border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md);
+        background: var(--color-bg-secondary);
+      }
+      .${CSS}-guide-title {
+        font-size: 0.92rem; font-weight: 700; color: var(--color-text-primary);
+        margin-bottom: 6px;
+      }
+      .${CSS}-guide p { margin: 6px 0; }
+      .${CSS}-guide ol {
+        margin: 8px 0; padding-left: 20px;
+      }
+      .${CSS}-guide ol li { margin: 4px 0; }
+      .${CSS}-guide-note {
+        font-size: 0.72rem; color: var(--color-text-muted);
+        font-style: italic;
       }
 
       /* Cards */
