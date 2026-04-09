@@ -141,26 +141,18 @@ Theme switching (light/dark/high-contrast), metadata cache TTL, AI provider conf
 
 ## Architecture
 
+Zero dependencies, no build system, no backend — everything runs in the browser as pure ES modules.
+
+The core challenge: the side panel (`chrome-extension://` origin) is CORS-blocked from all Dynamics 365 endpoints. The solution is a three-hop message relay through a MAIN world content script that runs at the page's origin and inherits session cookies — no OAuth tokens needed.
+
 ```
-Dynamics 365 page (*.dynamics.com)
-  └─ content-script.js  (ISOLATED world)
-       └─ page-extractor.js  (MAIN world)  ← runs at org origin, has session cookies
-
-Side Panel  ──────────────────────────────────────
-  app.js  (bootstrap, tab routing, MetadataCache)
-  modules/  (one class per tab, lazy-loaded)
-     └─ apiClient.request() → chrome.runtime.sendMessage
-
-Background Service Worker
-  proxyApiRequest() → sendMessage to tab content script
-                          └─ page-extractor.js fetch() → Dataverse Web API
+Side Panel → Background Worker → Content Script → Page Extractor → Dataverse Web API
+              (message router)    (ISOLATED world)   (MAIN world, has session cookies)
 ```
 
-**Why this routing:** The side panel runs at `chrome-extension://`, which is CORS-blocked from all `*.dynamics.com` endpoints. The MAIN world content script runs at the page's own origin and inherits session cookies — no Bearer token needed.
+Each side panel tab is backed by a lazy-loaded module class with a consistent contract (constructor, render, destroy). Modules share an API client, a TTL-based metadata cache, and an event bus — but never communicate directly with each other.
 
-- **No build system** — pure ES modules, no bundler
-- **No external dependencies** — built from scratch
-- **No backend** — everything runs in the browser
+For the full conceptual deep-dive — CORS routing, module system, data flow, security boundaries, and lifecycle management — see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ---
 

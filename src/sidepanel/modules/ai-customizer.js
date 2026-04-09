@@ -11,6 +11,10 @@ import { renderXmlDiff } from './ai-customizer/xml-diff.js';
 import { AgentRunner } from './ai-customizer/agent-runner.js';
 import { AgentTimeline } from './ai-customizer/agent-timeline.js';
 import { ViewOperation } from './ai-customizer/operations/view-operation.js';
+import { ToolRegistry, registerBuiltinTools } from './ai-customizer/tool-registry.js';
+import { ToolExecutor } from './ai-customizer/tool-executor.js';
+import { SkillManager } from './ai-customizer/skill-manager.js';
+import { SessionManager } from './ai-customizer/session-manager.js';
 
 const CSS = 'ac';
 const STORAGE_KEY = 'dvt-settings';
@@ -32,6 +36,10 @@ export default class AiCustomizer {
   #activeOp = null;
   #opContext = null;
   #runner = null;
+  #toolRegistry = null;
+  #toolExecutor = null;
+  #skillManager = null;
+  #sessionManager = null;
   #debugLog = [];
   #activeFilter = 'all';
   #autoScroll = true;
@@ -78,10 +86,39 @@ export default class AiCustomizer {
 
     this.#activeOp = new ViewOperation(this.api, this.cache, this.#settings);
 
+    // Initialize tool system
+    this.#toolRegistry = new ToolRegistry();
+    registerBuiltinTools(this.#toolRegistry);
+    await this.#toolRegistry.load(); // load user tools
+    this.#toolExecutor = new ToolExecutor(this.#toolRegistry, this.api, this.cache, {
+      onConfirmation: (tool, params, reasoning) => this._showConfirmation(tool, params, reasoning),
+      onLog: (tag, summary, detail) => this._log(tag, summary, detail),
+    });
+
+    // Initialize skill + session managers
+    this.#skillManager = new SkillManager();
+    await this.#skillManager.load();
+    this.#sessionManager = new SessionManager();
+    await this.#sessionManager.load();
+
     this._buildToolbar();
     this._buildChatArea();
     this._buildDebugConsole();
     this._buildInputBar();
+
+    // Restore session messages if any
+    const history = this.#sessionManager.getHistory();
+    if (history.length > 0) {
+      for (const msg of history) {
+        if (msg.type === 'user') {
+          this._addUserMessage(msg.text);
+        } else {
+          const agentMsg = this._addAgentMessage();
+          agentMsg.statusLine.textContent = msg.text || '';
+          agentMsg.statusLine.style.color = 'var(--color-text-muted)';
+        }
+      }
+    }
 
     this._log('META', 'Loading entities...');
     try {
@@ -141,7 +178,56 @@ export default class AiCustomizer {
     label.textContent = `${this.#settings.aiProvider} \u00B7 ${this.#settings.aiModel || 'default'}`;
     status.append(dot, label);
 
-    toolbar.append(entityGroup, this.#selectorContainer, status);
+    // Session controls
+    const sessionGroup = document.createElement('div');
+    sessionGroup.className = `${CSS}-session-bar`;
+
+    const sessionSelect = document.createElement('select');
+    sessionSelect.className = `${CSS}-select`;
+    sessionSelect.style.cssText = 'font-size:0.72rem;max-width:140px;';
+    this._populateSessionSelect(sessionSelect);
+    sessionSelect.addEventListener('change', () => {
+      if (sessionSelect.value === '__new__') {
+        const name = `Session ${this.#sessionManager.getAll().length + 1}`;
+        this.#sessionManager.create(name);
+        this.#sessionManager.save();
+        this._populateSessionSelect(sessionSelect);
+        this._clearChat();
+      } else {
+        this.#sessionManager.switchTo(sessionSelect.value);
+        this.#sessionManager.save();
+        this._clearChat();
+        // Replay session messages
+        for (const msg of this.#sessionManager.getHistory()) {
+          if (msg.type === 'user') this._addUserMessage(msg.text);
+          else {
+            const am = this._addAgentMessage();
+            am.statusLine.textContent = msg.text || '';
+            am.statusLine.style.color = 'var(--color-text-muted)';
+          }
+        }
+      }
+    });
+
+    const exportBtn = document.createElement('button');
+    exportBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+    exportBtn.textContent = 'Export';
+    exportBtn.title = 'Export session as JSON';
+    exportBtn.addEventListener('click', () => {
+      const json = this.#sessionManager.exportAsJson();
+      if (json) {
+        const blob = new Blob([json], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `session_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+    });
+
+    sessionGroup.append(sessionSelect, exportBtn);
+
+    toolbar.append(sessionGroup, entityGroup, this.#selectorContainer, status);
     this.container.appendChild(toolbar);
   }
 
@@ -180,6 +266,25 @@ export default class AiCustomizer {
     } catch (err) {
       this._log('ERR', `Failed to load views: ${err.message}`);
     }
+  }
+
+  _populateSessionSelect(select) {
+    select.innerHTML = '';
+    for (const s of this.#sessionManager.getAll()) {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      opt.selected = s.id === this.#sessionManager.activeId;
+      select.appendChild(opt);
+    }
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__';
+    newOpt.textContent = '+ New Session';
+    select.appendChild(newOpt);
+  }
+
+  _clearChat() {
+    if (this.#chatArea) this.#chatArea.innerHTML = '';
   }
 
   _onTargetReady(context) {
@@ -380,8 +485,6 @@ export default class AiCustomizer {
   async _onSend() {
     const userPrompt = this.#promptTextarea?.value?.trim();
     if (!userPrompt) return;
-    if (!this.#selectedEntity) { this._log('WARN', 'Select an entity first'); return; }
-    if (!this.#opContext) { this._log('WARN', 'Select a view first'); return; }
 
     if (this.#runner) { this.#runner.abort(); this.#runner = null; this.#sendBtn.textContent = 'Send'; return; }
 
@@ -390,49 +493,89 @@ export default class AiCustomizer {
     this._updateTokenEstimate();
     this.#sendBtn.textContent = 'Cancel';
 
-    // Add user message to chat
+    // Add user message to chat + session
     this._addUserMessage(userPrompt);
+    this.#sessionManager.addMessage({ type: 'user', text: userPrompt });
 
     // Add agent message container
     const agentMsg = this._addAgentMessage();
     const timeline = new AgentTimeline(agentMsg.timelineEl);
     timeline.onAnswer = (answer) => this.#runner?.continueWithAnswer(answer);
 
-    // Load metadata
-    this._log('META', `Loading attributes for ${this.#selectedEntity.LogicalName}...`);
-    try {
-      const [attributes, relationships] = await Promise.all([
-        this.cache.getAttributes(this.#selectedEntity.LogicalName),
-        this.cache.getRelationships(this.#selectedEntity.LogicalName),
-      ]);
-      const allRels = [...(relationships.ManyToOne || []), ...(relationships.OneToMany || [])];
-      this._log('META', `${attributes.length} attributes, ${allRels.length} relationships`);
-
-      // Use CURRENT state from the operation (reflects previous applies)
+    // Build system prompt: base context + tool list + optional override
+    let systemPrompt;
+    if (this.#systemPromptOverride) {
+      systemPrompt = this.#systemPromptOverride;
+    } else {
       const currentState = this.#activeOp.currentState;
-      const context = {
-        ...this.#opContext,
-        ...currentState,
-        attributes,
-        relationships: allRels,
-        systemPromptOverride: this.#systemPromptOverride,
-      };
+      const contextParts = [
+        `You are a Dataverse / Dynamics 365 agent running inside a Chrome extension side panel.`,
+        `You can call tools to interact with the environment. Always respond with a JSON object.`,
+        '',
+        `## Response Format`,
+        `{ "status": "tool_call", "tool": "<tool_id>", "params": {...}, "reasoning": "..." }`,
+        `{ "status": "tool_calls", "calls": [...], "reasoning": "..." }  — for multiple parallel calls`,
+        `{ "status": "done", "result": {...}, "reasoning": "..." }  — when task is complete`,
+        `{ "status": "question", "question": "...", "reasoning": "..." }  — to ask the user`,
+        `{ "status": "error", "error": "...", "reasoning": "..." }`,
+        ``,
+        `The "reasoning" field is REQUIRED. Use Markdown formatting.`,
+        `Do NOT wrap JSON in code fences. Return raw JSON only.`,
+        '',
+        this.#toolRegistry.buildToolListForPrompt(),
+        '',
+        `## Current Context`,
+        `Entity: ${this.#selectedEntity?.LogicalName || '(none)'}`,
+        `EntitySet: ${this.#selectedEntity?.EntitySetName || ''}`,
+      ];
+      if (currentState.viewName) {
+        contextParts.push(`View: "${currentState.viewName}"`);
+        contextParts.push(`Current layoutxml: ${currentState.layoutxml || '(none)'}`);
+        contextParts.push(`Current fetchxml: ${currentState.fetchxml || '(none)'}`);
+      }
+      // Inject skill context
+      const toolIds = this.#toolRegistry.getAll().map(t => t.id);
+      const skillSection = this.#skillManager.buildSkillPromptSection(toolIds);
+      if (skillSection) contextParts.push(skillSection);
 
-      this.#runner = new AgentRunner(this.api, this.cache, this.#settings, {
-        onStep: (step) => { timeline.updateStep(step); this._scrollChat(); },
-        onLog: (tag, summary, detail) => this._log(tag, summary, detail),
-      });
+      systemPrompt = contextParts.join('\n');
+    }
 
-      const result = await this.#runner.run(this.#activeOp, context, userPrompt);
+    try {
+      this.#runner = new AgentRunner(this.api, this.cache, this.#settings,
+        this.#toolExecutor, this.#toolRegistry, {
+          onStep: (step) => { timeline.updateStep(step); this._scrollChat(); },
+          onLog: (tag, summary, detail) => this._log(tag, summary, detail),
+        });
+
+      const result = await this.#runner.run(systemPrompt, userPrompt);
       this.#runner = null;
       this.#sendBtn.textContent = 'Send';
 
       this._log('META', `Agent finished \u2014 status: ${result?.status}`);
+      this.#sessionManager.addMessage({ type: 'agent', text: result?.reasoning || `Status: ${result?.status}` });
+      this.#sessionManager.save();
 
       if (result.status === 'done') {
-        const output = { layoutxml: result.layoutxml, fetchxml: result.fetchxml };
-        this._renderDiffInMessage(agentMsg, output, currentState);
-        this._renderActionsInMessage(agentMsg, output);
+        const res = result.result || {};
+        // Check if result contains view XML (backward compat with view operations)
+        if (res.layoutxml && res.fetchxml) {
+          const currentState = this.#activeOp.currentState;
+          const output = { layoutxml: res.layoutxml, fetchxml: res.fetchxml };
+          this._renderDiffInMessage(agentMsg, output, currentState);
+          this._renderActionsInMessage(agentMsg, output);
+        } else {
+          // Generic result — show as formatted JSON in status
+          const resultText = result.reasoning || JSON.stringify(res, null, 2);
+          agentMsg.statusLine.textContent = '\u2713 Done';
+          agentMsg.statusLine.style.color = 'var(--color-success)';
+          if (resultText && resultText !== '{}') {
+            const pre = document.createElement('pre');
+            pre.style.cssText = 'font-size:0.72rem;color:var(--color-text-muted);margin:4px 0 0;white-space:pre-wrap;max-height:200px;overflow-y:auto;';
+            pre.textContent = resultText;
+            agentMsg.bubble.appendChild(pre);
+          }
+        }
       } else if (result.status === 'error') {
         agentMsg.statusLine.textContent = `\u2717 ${result.error}`;
         agentMsg.statusLine.style.color = 'var(--color-error)';
@@ -445,6 +588,63 @@ export default class AiCustomizer {
       this.#runner = null;
       this.#sendBtn.textContent = 'Send';
     }
+  }
+
+  // =========================================================================
+  // Tool Confirmation UI
+  // =========================================================================
+
+  /**
+   * Show a confirmation dialog for a tool call. Returns a promise that resolves
+   * to true (approved) or false (rejected).
+   */
+  _showConfirmation(tool, params, reasoning) {
+    return new Promise((resolve) => {
+      const container = document.createElement('div');
+      container.className = `${CSS}-confirm`;
+
+      container.innerHTML = `
+        <div class="${CSS}-confirm-header">
+          <span class="${CSS}-confirm-icon">\u26A0</span>
+          <span class="${CSS}-confirm-title">Tool: ${tool.name}</span>
+        </div>
+        <pre class="${CSS}-confirm-params">${JSON.stringify(params, null, 2)}</pre>
+        ${reasoning ? `<div class="${CSS}-confirm-reasoning">${reasoning}</div>` : ''}
+        <div class="${CSS}-confirm-actions"></div>
+      `;
+
+      const actions = container.querySelector(`.${CSS}-confirm-actions`);
+
+      const approveBtn = document.createElement('button');
+      approveBtn.className = `${CSS}-btn ${CSS}-btn-primary`;
+      approveBtn.textContent = 'Approve';
+      approveBtn.addEventListener('click', () => { container.remove(); resolve(true); });
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.className = `${CSS}-btn ${CSS}-btn-danger`;
+      rejectBtn.textContent = 'Reject';
+      rejectBtn.addEventListener('click', () => { container.remove(); resolve(false); });
+
+      const alwaysBtn = document.createElement('button');
+      alwaysBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+      alwaysBtn.textContent = 'Always approve';
+      if (tool.autoApprovable) {
+        alwaysBtn.addEventListener('click', () => {
+          this.#toolExecutor.setAutoApprove(tool.id, true);
+          container.remove();
+          resolve(true);
+        });
+      } else {
+        alwaysBtn.disabled = true;
+        alwaysBtn.title = 'This tool cannot be auto-approved';
+      }
+
+      actions.append(approveBtn, rejectBtn, alwaysBtn);
+
+      // Insert into the chat area (at the bottom, before input)
+      this.#chatArea.appendChild(container);
+      this._scrollChat();
+    });
   }
 
   // =========================================================================

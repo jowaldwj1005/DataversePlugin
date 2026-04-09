@@ -104,6 +104,15 @@ export function injectStyles() {
       color: var(--color-text-bright);
     }
 
+    /* Session bar */
+    .${CSS}-session-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+      padding-bottom: 4px;
+    }
+
     .${CSS}-status {
       display: flex;
       align-items: center;
@@ -415,6 +424,50 @@ export function injectStyles() {
     @keyframes ${CSS}-fade-in {
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Tool Confirmation */
+    .${CSS}-confirm {
+      margin: 8px 12px;
+      padding: 10px;
+      background: var(--color-bg-panel);
+      border: 1px solid var(--color-warning);
+      border-left: 3px solid var(--color-warning);
+      border-radius: var(--radius-md, 6px);
+      animation: ${CSS}-fade-in 0.2s ease;
+    }
+    .${CSS}-confirm-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--color-text-bright);
+      margin-bottom: 6px;
+    }
+    .${CSS}-confirm-icon { font-size: 1rem; }
+    .${CSS}-confirm-params {
+      font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+      font-size: 0.7rem;
+      background: var(--color-bg-input);
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      margin: 4px 0;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      color: var(--color-text-primary);
+    }
+    .${CSS}-confirm-reasoning {
+      font-size: 0.72rem;
+      color: var(--color-text-muted);
+      margin: 4px 0;
+    }
+    .${CSS}-confirm-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
     }
 
     /* Action bar */

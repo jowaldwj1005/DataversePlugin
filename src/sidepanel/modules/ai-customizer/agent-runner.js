@@ -1,9 +1,9 @@
 /**
- * AI Customizer — Agent Runner
+ * Dataverse Agent — Agent Runner
  *
- * Multi-turn agent loop that sends prompts to the AI provider,
- * handles tool calls (metadata requests), user questions, and
- * produces final view/form XML output.
+ * General-purpose multi-turn agent loop with tool calling.
+ * The agent can call any registered tool, ask user questions,
+ * and produce final results.
  */
 
 import { buildAiRequest, extractAiResponse, estimateTokens } from './provider-adapters.js';
@@ -14,33 +14,36 @@ export class AgentRunner {
   #api;
   #cache;
   #settings;
+  #toolExecutor;
+  #toolRegistry;
   #onStep;
   #onLog;
-  #onQuestion;
   #maxIterations;
   #aborted = false;
 
-  // Conversation state (persists across continueWithAnswer calls)
+  // Conversation state
   #systemPrompt = '';
-  #messages = [];         // { role, content }[]
-  #loadedEntities = new Map(); // entityName → { attributes, relationships }
-  #context = null;
-  #operation = null;
-  #resolveQuestion = null; // resolve function for pending question
+  #messages = [];
+  #resolveQuestion = null;
+  #resolveConfirmation = null;
 
   /**
-   * @param {object} api  DataverseClient
-   * @param {object} cache  MetadataCache
-   * @param {object} settings  AI provider settings
-   * @param {object} callbacks
-   * @param {(step: object) => void} callbacks.onStep  Timeline step callback
-   * @param {(tag: string, summary: string, detail?: string) => void} callbacks.onLog  Debug console callback
-   * @param {number} [callbacks.maxIterations=5]
+   * @param {Object} api           DataverseClient
+   * @param {Object} cache         MetadataCache
+   * @param {Object} settings      AI provider settings
+   * @param {Object} toolExecutor  ToolExecutor instance
+   * @param {Object} toolRegistry  ToolRegistry instance
+   * @param {Object} callbacks
+   * @param {(step: Object) => void} callbacks.onStep
+   * @param {(tag: string, summary: string, detail?: string) => void} callbacks.onLog
+   * @param {number} [callbacks.maxIterations=10]
    */
-  constructor(api, cache, settings, { onStep, onLog, maxIterations = 5 }) {
+  constructor(api, cache, settings, toolExecutor, toolRegistry, { onStep, onLog, maxIterations = 10 }) {
     this.#api = api;
     this.#cache = cache;
     this.#settings = settings;
+    this.#toolExecutor = toolExecutor;
+    this.#toolRegistry = toolRegistry;
     this.#onStep = onStep;
     this.#onLog = onLog;
     this.#maxIterations = maxIterations;
@@ -48,38 +51,24 @@ export class AgentRunner {
 
   /**
    * Run the agent loop.
-   * @param {object} operation  The active OperationBase instance
-   * @param {object} context  Operation context (entity, current XML, attributes, relationships)
-   * @param {string} userPrompt
-   * @returns {Promise<{ status: string, layoutxml?: string, fetchxml?: string, error?: string }>}
+   * @param {string} systemPrompt  Full system prompt (with tool list, skills, context)
+   * @param {string} userPrompt    User's message
+   * @returns {Promise<{ status: string, result?: any, error?: string }>}
    */
-  async run(operation, context, userPrompt) {
+  async run(systemPrompt, userPrompt) {
     this.#aborted = false;
-    this.#context = context;
-    this.#operation = operation;
-    this.#loadedEntities.clear();
-
-    // Store primary entity metadata
-    this.#loadedEntities.set(context.entityLogicalName, {
-      attributes: context.attributes,
-      relationships: context.relationships,
-    });
-
-    // Build system prompt (allow override for debugging/customization)
-    this.#systemPrompt = context.systemPromptOverride || operation.buildSystemPrompt(context);
-    const sysTokens = estimateTokens(this.#systemPrompt);
-    const userTokens = estimateTokens(userPrompt);
-    this.#onLog('SEND', `System prompt: ~${sysTokens} tokens, User prompt: ~${userTokens} tokens`, this.#systemPrompt);
-
-    // Initialize conversation
+    this.#systemPrompt = systemPrompt;
     this.#messages = [{ role: 'user', content: userPrompt }];
+
+    const sysTokens = estimateTokens(systemPrompt);
+    const userTokens = estimateTokens(userPrompt);
+    this.#onLog('SEND', `System: ~${sysTokens} tokens, User: ~${userTokens} tokens`, systemPrompt);
 
     return this.#loop();
   }
 
   /**
    * Continue after user answers a question.
-   * @param {string} answer
    */
   continueWithAnswer(answer) {
     if (this.#resolveQuestion) {
@@ -90,26 +79,23 @@ export class AgentRunner {
 
   abort() {
     this.#aborted = true;
-    if (this.#resolveQuestion) {
-      this.#resolveQuestion(null);
-      this.#resolveQuestion = null;
-    }
+    if (this.#resolveQuestion) { this.#resolveQuestion(null); this.#resolveQuestion = null; }
   }
 
   // ---------------------------------------------------------------------------
-  // Internal loop
+  // Main loop
   // ---------------------------------------------------------------------------
 
   async #loop() {
     for (let iteration = 0; iteration < this.#maxIterations; iteration++) {
       if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-      // Send to AI
-      const stepId = `step-${++stepCounter}`;
+      // Step: calling AI
+      const thinkStepId = `step-${++stepCounter}`;
       this.#onStep({
-        id: stepId,
+        id: thinkStepId,
         type: 'thinking',
-        label: iteration === 0 ? 'Analyzing your request...' : 'Generating response...',
+        label: iteration === 0 ? 'Analyzing your request...' : 'Processing...',
         reasoning: null,
         status: 'running',
         startedAt: performance.now(),
@@ -120,121 +106,43 @@ export class AgentRunner {
       try {
         parsed = await this.#callAi();
       } catch (err) {
-        this.#onStep({ id: stepId, type: 'error', label: `AI request failed: ${err.message}`, reasoning: null, status: 'error', startedAt: performance.now(), completedAt: performance.now() });
+        this.#onStep({ id: thinkStepId, type: 'error', label: `AI request failed: ${err.message}`, reasoning: null, status: 'error', startedAt: performance.now(), completedAt: performance.now() });
         return { status: 'error', error: err.message };
       }
 
       if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-      // Update thinking step with reasoning
+      // Update thinking step
       this.#onStep({
-        id: stepId,
+        id: thinkStepId,
         type: 'thinking',
-        label: iteration === 0 ? 'Analyzed request' : 'Generated response',
+        label: iteration === 0 ? 'Analyzed request' : 'Processed',
         reasoning: parsed.reasoning || null,
         status: 'done',
         startedAt: performance.now(),
         completedAt: performance.now(),
       });
 
-      // Handle status
+      // Dispatch by status
       switch (parsed.status) {
-        case 'done': {
-          // Validate
-          const validStepId = `step-${++stepCounter}`;
-          const validation = this.#operation.validate(parsed, this.#context);
+        case 'done':
+          return { status: 'done', result: parsed.result || parsed, reasoning: parsed.reasoning };
 
-          if (!validation.valid) {
-            // Critical errors — block apply, show errors
-            for (const w of validation.warnings) {
-              this.#onLog('ERR', w);
-            }
-            this.#onStep({
-              id: validStepId,
-              type: 'error',
-              label: `Validation failed — ${validation.warnings.length} error(s)`,
-              reasoning: validation.warnings.map(w => `- ${w}`).join('\n'),
-              status: 'error',
-              startedAt: performance.now(),
-              completedAt: performance.now(),
-            });
-            return { status: 'error', error: 'Validation failed: ' + validation.warnings[0] };
-          } else if (validation.warnings.length > 0) {
-            for (const w of validation.warnings) {
-              this.#onLog('WARN', w);
-            }
-            this.#onStep({
-              id: validStepId,
-              type: 'done',
-              label: `Validated — ${validation.warnings.length} warning(s)`,
-              reasoning: validation.warnings.map(w => `- ${w}`).join('\n'),
-              status: 'done',
-              startedAt: performance.now(),
-              completedAt: performance.now(),
-            });
-          } else {
-            this.#onStep({
-              id: validStepId,
-              type: 'done',
-              label: 'Validated — all columns exist',
-              reasoning: null,
-              status: 'done',
-              startedAt: performance.now(),
-              completedAt: performance.now(),
-            });
-          }
-          return parsed;
+        case 'tool_call': {
+          const continueLoop = await this.#handleToolCall(parsed);
+          if (!continueLoop) return { status: 'error', error: 'Tool call failed or rejected' };
+          break;
         }
 
-        case 'need_metadata': {
-          const entity = parsed.entity;
-          if (!entity) {
-            return { status: 'error', error: 'AI requested metadata but did not specify entity name' };
+        case 'tool_calls': {
+          if (Array.isArray(parsed.calls)) {
+            for (const call of parsed.calls) {
+              if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
+              const ok = await this.#handleToolCall({ ...call, reasoning: parsed.reasoning });
+              if (!ok) return { status: 'error', error: 'Tool call failed or rejected' };
+            }
           }
-
-          const metaStepId = `step-${++stepCounter}`;
-          this.#onStep({
-            id: metaStepId,
-            type: 'tool_call',
-            label: `Loading ${entity} metadata...`,
-            reasoning: parsed.reasoning || null,
-            status: 'running',
-            startedAt: performance.now(),
-            completedAt: null,
-          });
-
-          try {
-            const meta = await this.#fetchEntityMetadata(entity);
-            const attrCount = meta.attributes.length;
-            const relCount = meta.relationships.length;
-
-            this.#onStep({
-              id: metaStepId,
-              type: 'tool_result',
-              label: `Loaded ${entity} — ${attrCount} attributes, ${relCount} relationships`,
-              reasoning: null,
-              status: 'done',
-              startedAt: performance.now(),
-              completedAt: performance.now(),
-            });
-
-            // Append AI's response + metadata as conversation turns
-            this.#messages.push({ role: 'assistant', content: JSON.stringify(parsed) });
-            this.#messages.push({ role: 'user', content: this.#formatMetadataMessage(entity, meta) });
-
-          } catch (err) {
-            this.#onStep({
-              id: metaStepId,
-              type: 'error',
-              label: `Failed to load ${entity}: ${err.message}`,
-              reasoning: null,
-              status: 'error',
-              startedAt: performance.now(),
-              completedAt: performance.now(),
-            });
-            return { status: 'error', error: `Failed to load metadata for ${entity}: ${err.message}` };
-          }
-          break; // Continue loop
+          break;
         }
 
         case 'question': {
@@ -249,30 +157,90 @@ export class AgentRunner {
             completedAt: null,
           });
 
-          // Wait for user answer via promise
-          const answer = await new Promise(resolve => {
-            this.#resolveQuestion = resolve;
-          });
+          const answer = await new Promise(resolve => { this.#resolveQuestion = resolve; });
+          if (!answer || this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-          if (!answer || this.#aborted) {
-            return { status: 'error', error: 'Aborted by user' };
-          }
-
-          // Append AI's response + user answer as conversation turns
           this.#messages.push({ role: 'assistant', content: JSON.stringify(parsed) });
           this.#messages.push({ role: 'user', content: answer });
-          break; // Continue loop
+          break;
         }
 
         case 'error':
-          return parsed;
+          return { status: 'error', error: parsed.error, reasoning: parsed.reasoning };
 
         default:
-          return { status: 'error', error: `Unknown AI response status: ${parsed.status}` };
+          return { status: 'error', error: `Unknown status: ${parsed.status}` };
       }
     }
 
-    return { status: 'error', error: `Agent loop exceeded maximum iterations (${this.#maxIterations})` };
+    return { status: 'error', error: `Agent loop exceeded ${this.#maxIterations} iterations` };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool call handling
+  // ---------------------------------------------------------------------------
+
+  async #handleToolCall(call) {
+    const toolId = call.tool;
+    const params = call.params || {};
+    const reasoning = call.reasoning || '';
+
+    const tool = this.#toolRegistry.get(toolId);
+    const toolName = tool?.name || toolId;
+
+    // Step: tool call
+    const toolStepId = `step-${++stepCounter}`;
+    this.#onStep({
+      id: toolStepId,
+      type: 'tool_call',
+      label: `Calling: ${toolName}`,
+      reasoning: reasoning || null,
+      status: 'running',
+      startedAt: performance.now(),
+      completedAt: null,
+      toolCall: { toolId, params },
+    });
+
+    // Execute via ToolExecutor (handles confirmation)
+    const result = await this.#toolExecutor.execute(toolId, params, reasoning);
+
+    // Update step
+    const stepStatus = result.status === 'success' ? 'done' : 'error';
+    const stepLabel = result.status === 'success'
+      ? `${toolName} \u2014 done`
+      : result.status === 'rejected'
+        ? `${toolName} \u2014 rejected by user`
+        : `${toolName} \u2014 failed: ${result.error}`;
+
+    this.#onStep({
+      id: toolStepId,
+      type: 'tool_result',
+      label: stepLabel,
+      reasoning: null,
+      status: stepStatus,
+      startedAt: performance.now(),
+      completedAt: performance.now(),
+    });
+
+    // Append to conversation
+    this.#messages.push({ role: 'assistant', content: JSON.stringify(call) });
+
+    const resultText = result.status === 'success'
+      ? (typeof result.data === 'object' ? JSON.stringify(result.data) : String(result.data ?? ''))
+      : `Error: ${result.error || 'rejected'}`;
+
+    // Truncate large results
+    const maxLen = 8000;
+    const truncated = resultText.length > maxLen
+      ? resultText.slice(0, maxLen) + `\n...(truncated, ${resultText.length} chars total)`
+      : resultText;
+
+    this.#messages.push({
+      role: 'user',
+      content: `Tool "${toolId}" result:\n${truncated}\n\nContinue with your task. Respond with JSON.`,
+    });
+
+    return result.status === 'success';
   }
 
   // ---------------------------------------------------------------------------
@@ -284,86 +252,36 @@ export class AgentRunner {
       this.#settings.aiProvider, this.#systemPrompt, this.#messages, this.#settings
     );
 
-    // Safe logging — handle both OpenAI (body.messages) and Anthropic (body.messages without system)
     const allMessages = body.messages || [];
     const msgSummary = allMessages.map(m => {
       const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `[${m.role}] ${c.length > 200 ? c.slice(0, 200) + '…' : c}`;
+      return `[${m.role}] ${c.length > 200 ? c.slice(0, 200) + '\u2026' : c}`;
     }).join('\n');
-    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} — ${allMessages.length} messages`, msgSummary);
+    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} \u2014 ${allMessages.length} msgs`, msgSummary);
 
     let responseData;
     const startTime = performance.now();
     try {
       responseData = await this.#api.requestExternal(url, { method: 'POST', headers, body });
     } catch (err) {
-      const duration = ((performance.now() - startTime) / 1000).toFixed(1);
-      this.#onLog('ERR', `Request failed after ${duration}s: ${err.message}`);
+      const dur = ((performance.now() - startTime) / 1000).toFixed(1);
+      this.#onLog('ERR', `Request failed after ${dur}s: ${err.message}`);
       throw err;
     }
     const duration = ((performance.now() - startTime) / 1000).toFixed(1);
 
     const { content, inputTokens, outputTokens } = extractAiResponse(this.#settings.aiProvider, responseData);
-    const tokenInfo = inputTokens != null ? ` — in: ${inputTokens}, out: ${outputTokens}` : '';
-    this.#onLog('RECV', `200 OK — ${duration}s${tokenInfo}`, content || '(empty response)');
+    const tokenInfo = inputTokens != null ? ` \u2014 in: ${inputTokens}, out: ${outputTokens}` : '';
+    this.#onLog('RECV', `200 OK \u2014 ${duration}s${tokenInfo}`, content || '(empty)');
 
-    if (!content) {
-      throw new Error('AI returned empty response');
-    }
+    if (!content) throw new Error('AI returned empty response');
 
-    // Parse JSON — strip markdown fences if present
     const cleaned = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
     try {
       return JSON.parse(cleaned);
     } catch (e) {
-      this.#onLog('ERR', `Failed to parse AI response as JSON: ${e.message}`, content);
+      this.#onLog('ERR', `JSON parse failed: ${e.message}`, content);
       throw new Error(`Invalid JSON from AI: ${e.message}`);
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Metadata fetching
-  // ---------------------------------------------------------------------------
-
-  async #fetchEntityMetadata(entityName) {
-    // Check cache
-    if (this.#loadedEntities.has(entityName)) {
-      return this.#loadedEntities.get(entityName);
-    }
-
-    const [attributes, relationships] = await Promise.all([
-      this.#cache.getAttributes(entityName),
-      this.#cache.getRelationships(entityName),
-    ]);
-
-    const allRels = [
-      ...(relationships.ManyToOne || []),
-      ...(relationships.OneToMany || []),
-    ];
-
-    const meta = { attributes, relationships: allRels };
-    this.#loadedEntities.set(entityName, meta);
-    this.#onLog('META', `Loaded ${entityName}: ${attributes.length} attributes, ${allRels.length} relationships`);
-    return meta;
-  }
-
-  #formatMetadataMessage(entityName, meta) {
-    const attrLines = meta.attributes
-      .map(a => {
-        const dn = a.DisplayName?.UserLocalizedLabel?.Label || '';
-        return `  ${a.LogicalName} (${a.AttributeType})${dn ? ` — "${dn}"` : ''}`;
-      })
-      .join('\n');
-
-    const relLines = meta.relationships
-      .map(r => {
-        const dir = r.ReferencingEntity === entityName ? 'N:1' : '1:N';
-        const related = dir === 'N:1' ? r.ReferencedEntity : r.ReferencingEntity;
-        const lookupField = dir === 'N:1' ? r.ReferencingAttribute : r.ReferencedAttribute;
-        return `  ${r.SchemaName} (${dir} → ${related}) lookup: ${lookupField || '—'}`;
-      })
-      .join('\n');
-
-    return `Here are the attributes and relationships for "${entityName}":\n\nAttributes:\n${attrLines}\n\nRelationships:\n${relLines || '  (none)'}\n\nNow continue with your task. Respond with a JSON object.`;
   }
 }

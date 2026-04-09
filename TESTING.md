@@ -189,6 +189,25 @@ Configure AI provider in Settings: Provider, Endpoint URL, API Key, Model.
 | 8.29 | "System Prompt" button → edit → "Use Custom" | Next request uses custom prompt |
 | 8.30 | Clear button | Clears log, timeline, and aborts running agent |
 
+### Tool System (Exploration Mode)
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.31 | Prompt: "What entities have a thread relationship?" (no view selected) | Agent uses `get_entities` + `get_entity_metadata` tools freely. Timeline shows tool calls. |
+| 8.32 | Prompt: "Create a test account called AI Test" | Agent shows `create_record` confirmation: entity=accounts, data shown. [Approve] [Reject] [Always approve] |
+| 8.33 | Click "Approve" on create_record | Record created, agent shows result with ID |
+| 8.34 | Click "Always approve" on a tool | Subsequent calls to that tool execute without asking |
+| 8.35 | Prompt: "Run this FetchXML: ..." | Agent uses `execute_fetchxml` tool, returns results |
+
+### Sessions
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 8.36 | Session dropdown in toolbar | Shows "Default" session, "+ New Session" option |
+| 8.37 | Select "+ New Session" | New empty session, chat cleared |
+| 8.38 | Switch back to previous session | Chat history restored from that session |
+| 8.39 | "Export" button | Downloads session as JSON file |
+
 ---
 
 ## 9. Settings
