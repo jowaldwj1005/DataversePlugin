@@ -128,6 +128,26 @@ export class ToolRegistry {
  */
 export function registerBuiltinTools(registry) {
 
+  // -- Session management (no confirmation) ---------------------------------
+
+  registry.registerBuiltin({
+    id: 'name_conversation',
+    name: 'Name Conversation',
+    description: 'Set a short descriptive name for the current conversation session. Call this ONCE at the start of every new conversation based on the user\'s first message.',
+    category: 'other',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      name: { type: 'string', required: true, description: 'Short session name (2-5 words, e.g. "Thread View Customization" or "Account Data Exploration")' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      // The actual renaming is handled by the main module via onLog callback
+      ctx.log('SESSION_NAME', params.name);
+      return { success: true, name: params.name };
+    },
+  });
+
   // -- Metadata (read-only, no confirmation) --------------------------------
 
   registry.registerBuiltin({

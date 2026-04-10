@@ -182,37 +182,40 @@ export default class AiCustomizer {
     const sessionGroup = document.createElement('div');
     sessionGroup.className = `${CSS}-session-bar`;
 
-    const sessionSelect = document.createElement('select');
-    sessionSelect.className = `${CSS}-select`;
-    sessionSelect.style.cssText = 'font-size:0.72rem;max-width:140px;';
-    this._populateSessionSelect(sessionSelect);
-    sessionSelect.addEventListener('change', () => {
-      if (sessionSelect.value === '__new__') {
+    this._sessionSelect = document.createElement('select');
+    this._sessionSelect.className = `${CSS}-select`;
+    this._sessionSelect.style.cssText = 'font-size:0.72rem;max-width:140px;';
+    this._populateSessionSelect(this._sessionSelect);
+    this._sessionSelect.addEventListener('change', () => {
+      if (this._sessionSelect.value === '__new__') {
         const name = `Session ${this.#sessionManager.getAll().length + 1}`;
         this.#sessionManager.create(name);
         this.#sessionManager.save();
-        this._populateSessionSelect(sessionSelect);
+        this._populateSessionSelect(this._sessionSelect);
         this._clearChat();
       } else {
-        this.#sessionManager.switchTo(sessionSelect.value);
+        this.#sessionManager.switchTo(this._sessionSelect.value);
         this.#sessionManager.save();
-        this._clearChat();
-        // Replay session messages
-        for (const msg of this.#sessionManager.getHistory()) {
-          if (msg.type === 'user') this._addUserMessage(msg.text);
-          else {
-            const am = this._addAgentMessage();
-            am.statusLine.textContent = msg.text || '';
-            am.statusLine.style.color = 'var(--color-text-muted)';
-          }
-        }
+        this._replaySession();
       }
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+    deleteBtn.textContent = '\u00D7';
+    deleteBtn.title = 'Delete session';
+    deleteBtn.addEventListener('click', () => {
+      if (this.#sessionManager.getAll().length <= 1) return;
+      this.#sessionManager.delete(this.#sessionManager.activeId);
+      this.#sessionManager.save();
+      this._populateSessionSelect(this._sessionSelect);
+      this._replaySession();
     });
 
     const exportBtn = document.createElement('button');
     exportBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
-    exportBtn.textContent = 'Export';
-    exportBtn.title = 'Export session as JSON';
+    exportBtn.textContent = '\u2913';
+    exportBtn.title = 'Export session';
     exportBtn.addEventListener('click', () => {
       const json = this.#sessionManager.exportAsJson();
       if (json) {
@@ -225,9 +228,20 @@ export default class AiCustomizer {
       }
     });
 
-    sessionGroup.append(sessionSelect, exportBtn);
+    sessionGroup.append(this._sessionSelect, deleteBtn, exportBtn);
 
-    toolbar.append(sessionGroup, entityGroup, this.#selectorContainer, status);
+    // Collapsible Context section (Entity, Type, View)
+    const contextWrap = document.createElement('details');
+    contextWrap.className = `${CSS}-context-details`;
+    const contextSummary = document.createElement('summary');
+    contextSummary.className = `${CSS}-context-summary`;
+    contextSummary.textContent = 'Context';
+    const contextBody = document.createElement('div');
+    contextBody.className = `${CSS}-context-body`;
+    contextBody.append(entityGroup, this.#selectorContainer);
+    contextWrap.append(contextSummary, contextBody);
+
+    toolbar.append(sessionGroup, contextWrap, status);
     this.container.appendChild(toolbar);
   }
 
@@ -285,6 +299,23 @@ export default class AiCustomizer {
 
   _clearChat() {
     if (this.#chatArea) this.#chatArea.innerHTML = '';
+  }
+
+  _replaySession() {
+    this._clearChat();
+    for (const msg of this.#sessionManager.getHistory()) {
+      if (msg.type === 'user') {
+        this._addUserMessage(msg.text);
+      } else {
+        const am = this._addAgentMessage();
+        if (msg.text) {
+          const content = document.createElement('div');
+          content.className = `${CSS}-agent-content`;
+          content.innerHTML = this._renderMarkdown(msg.text);
+          am.bubble.appendChild(content);
+        }
+      }
+    }
   }
 
   _onTargetReady(context) {
@@ -367,11 +398,11 @@ export default class AiCustomizer {
 
     this.#promptTextarea = document.createElement('textarea');
     this.#promptTextarea.className = `${CSS}-prompt-input`;
-    this.#promptTextarea.placeholder = 'Describe what you want to change...';
+    this.#promptTextarea.placeholder = 'Enter to send, Shift+Enter for new line';
     this.#promptTextarea.rows = 2;
     this.#promptTextarea.addEventListener('input', () => this._updateTokenEstimate());
     this.#promptTextarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this._onSend();
       }
@@ -393,11 +424,7 @@ export default class AiCustomizer {
     this.#tokenEstimate = document.createElement('span');
     this.#tokenEstimate.className = `${CSS}-token-estimate`;
 
-    const hint = document.createElement('span');
-    hint.className = `${CSS}-prompt-hint`;
-    hint.textContent = 'Ctrl+Enter';
-
-    controls.append(this.#sendBtn, sysPromptBtn, this.#tokenEstimate, hint);
+    controls.append(this.#sendBtn, sysPromptBtn, this.#tokenEstimate);
     bar.append(this.#promptTextarea, controls);
     this.container.appendChild(bar);
   }
@@ -515,11 +542,13 @@ export default class AiCustomizer {
         `## Response Format`,
         `{ "status": "tool_call", "tool": "<tool_id>", "params": {...}, "reasoning": "..." }`,
         `{ "status": "tool_calls", "calls": [...], "reasoning": "..." }  — for multiple parallel calls`,
-        `{ "status": "done", "result": {...}, "reasoning": "..." }  — when task is complete`,
+        `{ "status": "done", "reasoning": "..." }  — when task is complete. Put your ENTIRE user-facing answer in "reasoning".`,
         `{ "status": "question", "question": "...", "reasoning": "..." }  — to ask the user`,
         `{ "status": "error", "error": "...", "reasoning": "..." }`,
         ``,
-        `The "reasoning" field is REQUIRED. Use Markdown formatting.`,
+        `CRITICAL: The "reasoning" field is your MAIN output to the user. Write your complete answer there using Markdown.`,
+        `IMPORTANT: On the FIRST message of a new conversation, call the "name_conversation" tool with a short 2-5 word name based on what the user is asking about. Do this BEFORE answering.`,
+        `For "done" status: "reasoning" IS your answer. Do NOT put your answer in "result" — put structured data there only if needed (e.g. generated XML).`,
         `Do NOT wrap JSON in code fences. Return raw JSON only.`,
         '',
         this.#toolRegistry.buildToolListForPrompt(),
@@ -565,15 +594,14 @@ export default class AiCustomizer {
           this._renderDiffInMessage(agentMsg, output, currentState);
           this._renderActionsInMessage(agentMsg, output);
         } else {
-          // Generic result — show as formatted JSON in status
-          const resultText = result.reasoning || JSON.stringify(res, null, 2);
-          agentMsg.statusLine.textContent = '\u2713 Done';
-          agentMsg.statusLine.style.color = 'var(--color-success)';
-          if (resultText && resultText !== '{}') {
-            const pre = document.createElement('pre');
-            pre.style.cssText = 'font-size:0.72rem;color:var(--color-text-muted);margin:4px 0 0;white-space:pre-wrap;max-height:200px;overflow-y:auto;';
-            pre.textContent = resultText;
-            agentMsg.bubble.appendChild(pre);
+          // Render reasoning as the main response (Markdown)
+          // The reasoning is ONLY shown here, not in the timeline thinking step (that only shows for intermediate steps)
+          const reasoning = result.reasoning || res.reasoning || '';
+          if (reasoning) {
+            const contentEl = document.createElement('div');
+            contentEl.className = `${CSS}-agent-content`;
+            contentEl.innerHTML = this._renderMarkdown(reasoning);
+            agentMsg.bubble.appendChild(contentEl);
           }
         }
       } else if (result.status === 'error') {
@@ -593,6 +621,33 @@ export default class AiCustomizer {
   // =========================================================================
   // Tool Confirmation UI
   // =========================================================================
+
+  // =========================================================================
+  // Content Rendering
+  // =========================================================================
+
+  /**
+   * Simple Markdown → HTML renderer.
+   * Supports: bold, inline code, headings, list items, newlines.
+   */
+  _renderMarkdown(md) {
+    if (!md) return '';
+    return md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/^### (.+)$/gm, '<strong style="font-size:0.82rem;">$1</strong><br>')
+      .replace(/^## (.+)$/gm, '<strong style="font-size:0.88rem;">$1</strong><br>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^- (.+)$/gm, '&nbsp;&nbsp;\u2022 $1<br>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
+  }
+
+  _escHtml(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 
   /**
    * Show a confirmation dialog for a tool call. Returns a promise that resolves
@@ -817,6 +872,14 @@ export default class AiCustomizer {
   // =========================================================================
 
   _log(tag, summary, detail = null) {
+    // Handle session naming from the name_conversation tool
+    if (tag === 'SESSION_NAME' && summary) {
+      this.#sessionManager.rename(this.#sessionManager.activeId, summary);
+      this.#sessionManager.save();
+      if (this._sessionSelect) this._populateSessionSelect(this._sessionSelect);
+      return; // Don't log to console
+    }
+
     const entry = { time: new Date().toLocaleTimeString('de-DE', { hour12: false }), tag, summary, detail, expanded: false };
     this.#debugLog.push(entry);
     if (this.#debugLog.length > MAX_LOG_ENTRIES) this.#debugLog.shift();

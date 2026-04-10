@@ -110,7 +110,26 @@ export function injectStyles() {
       align-items: center;
       gap: 4px;
       flex-shrink: 0;
-      padding-bottom: 4px;
+    }
+
+    /* Collapsible context (entity/type/view) */
+    .${CSS}-context-details {
+      flex: 1;
+      min-width: 0;
+    }
+    .${CSS}-context-summary {
+      font-size: 0.72rem;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      user-select: none;
+      padding: 2px 0;
+    }
+    .${CSS}-context-summary:hover { color: var(--color-text-primary); }
+    .${CSS}-context-body {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 4px 0 0;
     }
 
     .${CSS}-status {
@@ -167,6 +186,43 @@ export function injectStyles() {
       font-size: 0.72rem;
       margin-top: 6px;
       min-height: 0;
+    }
+
+    /* Agent content (rendered Markdown) */
+    .${CSS}-agent-content {
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: var(--color-text-primary);
+      margin-top: 6px;
+    }
+    .${CSS}-agent-content p { margin: 4px 0; }
+    .${CSS}-agent-content ul { margin: 4px 0 4px 8px; padding-left: 12px; }
+    .${CSS}-agent-content li { margin: 2px 0; }
+    .${CSS}-agent-content strong { color: var(--color-text-bright); }
+    .${CSS}-agent-content em { color: var(--color-text-muted); }
+    .${CSS}-agent-content code {
+      background: var(--color-bg-input);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-size: 0.78rem;
+    }
+    .${CSS}-agent-data {
+      margin-top: 6px;
+      font-size: 0.72rem;
+    }
+    .${CSS}-agent-data summary {
+      cursor: pointer;
+      color: var(--color-text-muted);
+    }
+    .${CSS}-agent-data pre {
+      margin: 4px 0;
+      padding: 6px;
+      background: var(--color-bg-input);
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+      font-size: 0.68rem;
+      max-height: 200px;
+      overflow-y: auto;
     }
 
     /* Input bar (fixed at bottom) */
@@ -331,6 +387,34 @@ export function injectStyles() {
       font-size: 0.78rem;
     }
     .${CSS}-timeline-question-input input:focus { border-color: var(--color-border-focus); outline: none; }
+
+    /* Tool call expandable details */
+    .${CSS}-timeline-tool-details {
+      width: 100%;
+      padding-left: 24px;
+      margin-top: 2px;
+    }
+    .${CSS}-timeline-tool-details summary {
+      font-size: 0.68rem;
+      color: var(--color-text-disabled);
+      cursor: pointer;
+    }
+    .${CSS}-timeline-tool-details summary:hover { color: var(--color-text-muted); }
+    .${CSS}-timeline-tool-details pre {
+      font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+      font-size: 0.65rem;
+      line-height: 1.4;
+      background: var(--color-bg-input);
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 4px 6px;
+      margin: 2px 0 0;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--color-text-muted);
+    }
 
     /* ================================================================
      * Diff Panel

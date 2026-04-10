@@ -233,9 +233,11 @@ export default class ToolBuilder {
         item.className = `${CSS}-entity-option`;
         const dn = ent.DisplayName?.UserLocalizedLabel?.Label;
         item.textContent = dn ? `${dn} (${ent.LogicalName})` : ent.LogicalName;
-        item.addEventListener('click', () => {
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault(); // prevent input blur so click completes
           list.style.display = 'none';
           input.value = item.textContent;
+          input.blur();
           this._selectEntity(ent);
         });
         list.appendChild(item);
@@ -245,7 +247,7 @@ export default class ToolBuilder {
 
     input.addEventListener('focus', () => { input.select(); renderList(''); });
     input.addEventListener('input', () => renderList(input.value));
-    input.addEventListener('blur', () => setTimeout(() => list.style.display = 'none', 200));
+    input.addEventListener('blur', () => { list.style.display = 'none'; });
 
     wrap.append(input, list);
     return wrap;

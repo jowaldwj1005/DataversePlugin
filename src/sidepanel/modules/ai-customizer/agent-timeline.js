@@ -107,8 +107,23 @@ export class AgentTimeline {
       <span class="${CSS}-timeline-duration">${durationText}</span>
     `;
 
-    // Reasoning (Markdown)
-    if (step.reasoning) {
+    // Tool call details (expandable)
+    if (step.toolCall && (step.type === 'tool_call' || step.type === 'tool_result')) {
+      const details = document.createElement('details');
+      details.className = `${CSS}-timeline-tool-details`;
+      const summary = document.createElement('summary');
+      summary.textContent = step.type === 'tool_call' ? 'Parameters' : 'Details';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(step.toolCall.params, null, 2);
+      if (step.toolResult) {
+        pre.textContent += '\n\n--- Result ---\n' + (typeof step.toolResult === 'string' ? step.toolResult : JSON.stringify(step.toolResult, null, 2));
+      }
+      details.append(summary, pre);
+      el.appendChild(details);
+    }
+
+    // Reasoning (only for thinking steps, not duplicated in final content)
+    if (step.reasoning && step.type === 'thinking') {
       const reasoning = document.createElement('div');
       reasoning.className = `${CSS}-timeline-reasoning`;
       reasoning.innerHTML = renderMarkdown(step.reasoning);

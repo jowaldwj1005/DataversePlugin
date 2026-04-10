@@ -1,188 +1,86 @@
 # Dataverse Toolkit
 
-A Chrome Extension for Dynamics 365 / Power Platform developers, built entirely through vibe coding with Claude. No frameworks, no build tools, no dependencies — just raw ES modules, SVG, and a side panel that does more than most standalone apps.
-
-Every feature was designed and implemented in conversation, from the first API proxy to the force-directed ERD layout. The result is a zero-dependency developer toolkit that runs entirely in the browser.
+A Chrome Extension for Dynamics 365 / Power Platform developers. No frameworks, no build tools, no dependencies — just raw ES modules and a side panel that does more than most standalone apps.
 
 ## Installation
 
-1. [Download the latest release as a ZIP](../../releases/latest) (or clone this repo)
-2. Open `chrome://extensions` in Chrome
-3. Enable **Developer mode** (top right toggle)
-4. Click **Load unpacked** and select the project folder
-5. Navigate to any Dynamics 365 / Power Platform environment and sign in
-6. Open the side panel via the extension icon
+1. [Download the latest release](../../releases/latest) or clone this repo
+2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select project folder
+3. Navigate to any Dynamics 365 environment, sign in, and open the side panel
 
-**Requirements:** Google Chrome 114+ · Access to a Dynamics 365 / Power Platform environment
+**Requires:** Chrome 114+ · Dynamics 365 / Power Platform environment
 
 ---
 
-## Features
-
-### API Explorer
-
-Browse your entire Dataverse schema in a VS Code-style tree. Tables, columns, relationships, keys, forms, views, global option sets, custom APIs (actions/functions), and solutions — with full metadata details and virtual scrolling for large orgs.
-
-<img src="image-1.png" width="600">
-
----
-
-### Query Builder (FetchXML)
-
-Visual node-card query builder. Each table appears as a card with:
-- Checkable columns with attribute type badges
-- Nested filter groups (AND/OR, type-aware operators, OptionSet dropdowns for picklists)
-- Sort rows with drag-and-drop reordering
-- "+ Add Related Table" with relationship picker (N:1 / 1:N / N:N)
-
-Switch between **FetchXML** and **OData** output. Execute and view results inline. Code generation in C#, JavaScript, and Power Automate HTTP action.
-
-<img src="image-2.png" width="600"> <img src="image-3.png" width="600"> <img src="image-4.png" width="600">
-
----
-
-### Request Builder
-<!-- screenshot: request builder with entity autocomplete open, response panel showing JSON -->
-
-Craft any Web API request with entity autocomplete, OData query options (auto-disabled when a record ID is entered), a header preset library, and a full response viewer with syntax highlighting. Requests are saved to history with favorites. Code generation in JavaScript, C#, Python, and cURL.
-
----
-
-### Bulk Operations
-<!-- screenshot: bulk ops tab with two operation cards in different-colored changesets, templates menu open -->
-
-Build and execute `$batch` requests with a wizard system:
-
-| Wizard | What it does |
-|--------|-------------|
-| **Bulk Create** | Form mode or CSV paste → POST operations |
-| **Bulk Update** | OData filter → fetch records → PATCH with new values |
-| **Bulk Delete** | Type entity name to confirm → DELETE operations |
-| **Status Toggle** | Change statecode/statuscode across matching records |
-| **Bulk Assign** | Reassign record ownership to a user or team |
-| **Deep Insert** | POST a parent record with nested child records in one call |
-| **Data Export (CMT)** | Export records as Configuration Migration Tool zip (data_schema.xml + data.xml) |
-| **Data Import (CMT)** | Upload a CMT zip → review entities → upsert or create |
-
-Supports ChangeSets (transactional groups), drag-and-drop reordering, and a guided single-operation builder with type-aware inputs for every field type.
-
-<img src="image7.png" width="600"> 
-
----
-
-### Security Inspector
-<!-- screenshot: security tab showing role privilege matrix with depth indicators (User/BU/Parent/Org) -->
-
-- Role-privilege matrix per entity (Create/Read/Write/Delete/Append/AppendTo/Assign/Share with depth indicators)
-- User permission lookup via `RetrieveUserPrivileges` (all privileges across direct + team roles)
-- Field-level security profiles
-- Audit configuration viewer
-
-<img src="image.png" width="600"> 
-
----
-
-### ERD Viewer
-<!-- screenshot: ERD tab showing 6 entity boxes connected by arrows with crow's foot notation, detail panel open on right -->
-
-Load any unmanaged Dataverse solution and get a fully interactive entity-relationship diagram:
-
-- **Force-directed layout** with Fruchterman-Reingold physics, toggle to grid with animated transitions
-- **Entity dragging** — grab any box, arrows follow with requestAnimationFrame throttling
-- **Crow's foot notation** — proper ERD markers (||, fork) for 1:N and N:N cardinality
-- **N:N relationships** rendered with distinct dotted styling + intersect entity tooltip
-- **Orthogonal routing** — clean Manhattan-style lines with lane offsets; toggle to Bezier
-- **Relationship highlighting** — hover to highlight connections, fade everything else
-- **Minimap** — canvas overview with viewport indicator, click to navigate
-- **Per-entity column chooser** and FK field filter to reduce visual noise
-- **SVG & PNG export**, **JSON Schema draft-07 export**, **example payload export**
-- **Keyboard shortcuts** — `+`/`-` zoom, `0` reset, `f` filter, `Escape` clear selection
-
-All in ~1500 lines of vanilla JS and SVG — no D3, no Cytoscape, no graph library.
-
-<img src="imag-0.png" width="600"> 
-
----
-
-### Agent Tool Builder
-
-Generate AI-ready tool schemas from any Dataverse entity. Select an entity, pick columns, add 1:N child entities for deep insert — outputs ready-to-use JSON Schema definitions for Claude, OpenAI, or MCP tool configurations. Includes deep insert templates and API endpoint info.
-
----
+## Highlights
 
 ### AI Customizer (BYOK)
 
-> **Warning:** This feature modifies live Dataverse views. While it includes validation and a revert button, use at your own risk — always test on non-critical views first. The author takes no responsibility for broken views or lost configurations. During development, the built-in "Revert to Backup" button was used regularly to restore views.
-
 Modify and create Dataverse views using natural language. Bring your own API key (OpenAI, Azure OpenAI, Anthropic, or any compatible endpoint).
 
-- **Conversational UI** — chat-based interface where follow-up prompts build on previous changes
-- **Multi-turn agent** — automatically requests related entity metadata when generating link-entity columns
-- **Inline questions** — the agent can ask for clarification before making changes
-- **XML diff** — color-coded before/after with word-level highlighting and fullscreen toggle
-- **Validation** — blocks invalid XML patterns before applying (wrong suffixes, duplicates, nested link-entities)
-- **View creation** — create new saved queries from scratch via "+New"
-- **Debug console** — full transparency: every API call, prompt, and response is logged and expandable
-- **System prompt editor** — inspect and temporarily override the system prompt per session
+The agent automatically fetches related entity metadata, asks clarifying questions when needed, and shows a color-coded XML diff before applying changes. Follow-up prompts build on previous context — no re-explaining. Includes validation that blocks broken XML before it hits your environment, a revert button for every change, and a debug console that logs every API call.
+
+> **Warning:** This modifies live Dataverse views. Always test on non-critical views first.
+
+### ERD Viewer
+
+Load any unmanaged solution and get a fully interactive entity-relationship diagram — force-directed layout, crow's foot notation, orthogonal routing, minimap, and drag-and-drop. Export as SVG, PNG, JSON Schema (draft-07), or example payloads. All in vanilla JS and SVG, no graph library.
+
+<img src="imag-0.png" width="600">
+
+### Query Builder (FetchXML)
+
+Visual card-based query builder with type-aware filters, OptionSet dropdowns, drag-and-drop sort, and related table joins (N:1 / 1:N / N:N). Switch between FetchXML and OData output, execute inline, generate code in C#, JavaScript, and Power Automate.
+
+<img src="image-2.png" width="600"> <img src="image-3.png" width="600">
 
 ---
 
-### Form Inspector
+## All Features
 
-Inspect the current Dynamics 365 form context — read field values, form type, entity metadata, and control states from the live Xrm.Page context.
+| Tab | What it does |
+|-----|-------------|
+| **API Explorer** | VS Code-style schema tree — tables, columns, relationships, keys, forms, views, option sets, custom APIs, solutions |
+| **Query Builder** | Visual FetchXML / OData builder with inline execution and code generation |
+| **Request Builder** | Raw HTTP tool with entity autocomplete, header presets, history, and code generation (JS, C#, Python, cURL) |
+| **Bulk Operations** | `$batch` wizard system — bulk create/update/delete, status toggle, reassign, deep insert, CMT export/import |
+| **Security Inspector** | Role-privilege matrix, user permission lookup, field-level security profiles, audit config |
+| **ERD Viewer** | Interactive ER diagrams from solutions with multiple layout engines and export formats |
+| **Agent Tool Builder** | Generate JSON Schema tool definitions (Claude/OpenAI/MCP) from any entity, with deep insert support |
+| **AI Customizer** | BYOK conversational agent for view modification and creation with validation and revert |
+| **Form Inspector** | Read live Xrm.Page context — field values, form type, control states |
+| **Settings** | Themes, cache TTL, AI provider config |
 
----
-
-### Settings
-
-Theme switching (light/dark/high-contrast), metadata cache TTL, AI provider configuration (endpoint, API key, model with live endpoint preview).
+<img src="image-1.png" width="600"> <img src="image7.png" width="600"> <img src="image.png" width="600">
 
 ---
 
 ## Architecture
 
-Zero dependencies, no build system, no backend — everything runs in the browser as pure ES modules.
-
-The core challenge: the side panel (`chrome-extension://` origin) is CORS-blocked from all Dynamics 365 endpoints. The solution is a three-hop message relay through a MAIN world content script that runs at the page's origin and inherits session cookies — no OAuth tokens needed.
+Zero dependencies, no build system, no backend. The side panel is CORS-blocked from Dynamics 365, so requests route through a MAIN world content script that inherits session cookies — no OAuth tokens needed.
 
 ```
 Side Panel → Background Worker → Content Script → Page Extractor → Dataverse Web API
-              (message router)    (ISOLATED world)   (MAIN world, has session cookies)
 ```
 
-Each side panel tab is backed by a lazy-loaded module class with a consistent contract (constructor, render, destroy). Modules share an API client, a TTL-based metadata cache, and an event bus — but never communicate directly with each other.
-
-For the full conceptual deep-dive — CORS routing, module system, data flow, security boundaries, and lifecycle management — see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
-
----
-
-## Skills & Patterns
-
-The `skills/` folder contains transferable engineering knowledge extracted from building this project. Useful if you want to build something similar:
-
-| Skill | What it covers |
-|-------|---------------|
-| [skills/dataverse-api-gotchas.md](skills/dataverse-api-gotchas.md) | Non-obvious Dataverse Web API behaviors: metadata endpoint limits, privilege resolution, FetchXML URL requirements, N:N expand limitations, `$batch` parsing |
-| [skills/chrome-mv3-patterns.md](skills/chrome-mv3-patterns.md) | Chrome MV3 patterns: CORS bypass via MAIN world content script, service worker state survival, content script re-injection after dev reload, ES modules without bundlers |
-
-See [CLAUDE.md](CLAUDE.md) for full architecture docs used by Claude when working on this project.
+Each tab is a lazy-loaded module sharing an API client and metadata cache. See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the full deep-dive.
 
 ---
 
 ## Easter Eggs
 
 | Trigger | What happens |
-| ------- | ------------ |
-| `↑ ↑ ↓ ↓ ← → ← → B A` (Konami Code) | Matrix Rain — entity names fall from the sky, dangerous words (DROP, DELETE) in red |
-| Double-click `🐍` in the ERD toolbar | Snake game — eat entity boxes, their names appear in the snake body. Every 3rd entity triggers a "deleted from production" toast |
-| Various actions (15% chance) | Clippy shows up with sarcastic comments |
-| Milestones | 18 achievements, persisted across sessions (visible in Settings tab) |
+|---------|-------------|
+| Konami Code | Matrix Rain — entity names fall from the sky |
+| Double-click the snake icon in ERD | Snake game with entity boxes as food |
+| Random actions (15% chance) | Clippy with sarcastic comments |
+| Various milestones | 18 achievements, persisted across sessions |
 
 <details>
 <summary>All 18 achievements</summary>
 
 | Icon | Title | How to unlock |
-| ---- | ----- | ------------- |
+|------|-------|---------------|
 | 🏁 | First Steps | Execute your first query |
 | 📊 | Data Hoarder | Retrieve 100+ records in one query |
 | 🗄️ | Data Warehouse | Retrieve 1000+ records in one query |
@@ -206,17 +104,9 @@ See [CLAUDE.md](CLAUDE.md) for full architecture docs used by Claude when workin
 
 ---
 
-## Vibe Coding
+## Skills
 
-This project was built entirely through iterative conversation with Claude — describing features, reviewing screenshots, adjusting behavior, and pushing the boundaries of what's possible without dependencies.
-
-A few things that stood out:
-
-- **The ERD viewer** went through multiple rounds of layout fixes, arrow routing, system field filtering, and export polish — each fixed in conversation without touching a code editor
-- **The wizard system** (6 wizards + CMT export/import) was built using a parallel subagent wave strategy: foundation modules in wave 1, wizard implementations in wave 2, integration in wave 3 — roughly 4x faster than sequential implementation
-- **Zero dependencies** was a deliberate constraint that forced creative solutions: browser-native zip parsing via `DecompressionStream`, SVG ERD rendering without D3, force-directed layout from scratch with Fruchterman-Reingold physics
-
-The `skills/` folder is a direct byproduct — patterns that emerged from hitting real Dataverse API limitations and Chrome MV3 edge cases, extracted so future Claude sessions (or other developers) can skip the trial and error.
+The [skills/](skills/) folder contains transferable patterns extracted from this project — Dataverse API gotchas and Chrome MV3 techniques. See [CLAUDE.md](CLAUDE.md) for the full project guide.
 
 ## License
 

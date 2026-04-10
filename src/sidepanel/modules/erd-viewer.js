@@ -25,22 +25,40 @@ const BUMP_R = 4;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// System lookup fields present on almost every entity — hidden by default
-const SYSTEM_FK_FIELDS = new Set([
-  'createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby',
-  'owningbusinessunit', 'owningteam', 'owninguser',
-]);
+// Arrow color palette — harmonious hues for dark backgrounds
+const ARROW_COLORS = [
+  '#6bc5e8', '#a78bfa', '#f9a857', '#4ade80', '#f472b6',
+  '#e879a0', '#60d5c4', '#c4b5fd', '#facc15', '#93c5fd',
+  '#fb923c', '#86efac', '#d8b4fe', '#67e8f9', '#fca5a5',
+];
 
-// System attributes excluded from default (collapsed) field view
-// System attribute base names always excluded from default (collapsed) view
-const SYSTEM_ATTR_NAMES = new Set([
-  'statecode', 'statuscode', 'createdon', 'modifiedon',
-  'createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby',
-  'owningbusinessunit', 'owningteam', 'owninguser', 'ownerid',
-  'versionnumber', 'importsequencenumber', 'overriddencreatedon',
-  'timezoneruleversionnumber', 'utcconversiontimezonecode',
-  'organizationid', 'transactioncurrencyid',
-  'exchangerate', 'processid', 'stageid', 'traversedpath',
+// System fields present on almost every entity — hidden by default, toggleable via dropdown
+const SYSTEM_FIELD_ENTRIES = [
+  ['createdby', 'Created By'],
+  ['modifiedby', 'Modified By'],
+  ['createdonbehalfby', 'Created By (Delegate)'],
+  ['modifiedonbehalfby', 'Modified By (Delegate)'],
+  ['owningbusinessunit', 'Owning Business Unit'],
+  ['owningteam', 'Owning Team'],
+  ['owninguser', 'Owning User'],
+  ['ownerid', 'Owner'],
+  ['statecode', 'Status'],
+  ['statuscode', 'Status Reason'],
+  ['createdon', 'Created On'],
+  ['modifiedon', 'Modified On'],
+  ['versionnumber', 'Version Number'],
+  ['importsequencenumber', 'Import Sequence Number'],
+  ['overriddencreatedon', 'Record Created On'],
+  ['timezoneruleversionnumber', 'TZ Rule Version'],
+  ['utcconversiontimezonecode', 'UTC Offset'],
+  ['transactioncurrencyid', 'Currency'],
+  ['exchangerate', 'Exchange Rate'],
+];
+const SYSTEM_FIELD_NAMES = new Set(SYSTEM_FIELD_ENTRIES.map(e => e[0]));
+
+// Fields that are pure system noise — always excluded, not even toggleable
+const SYSTEM_NOISE_NAMES = new Set([
+  'organizationid', 'processid', 'stageid', 'traversedpath',
   'slaid', 'slainvokedid',
 ]);
 
@@ -151,21 +169,21 @@ function entityHeight(fieldCount) {
  */
 function isSystemNoise(attr, lookupNames) {
   const name = attr.LogicalName;
-  // Explicit blocklist
-  if (SYSTEM_ATTR_NAMES.has(name)) return true;
+  // Pure noise — always hidden, not toggleable
+  if (SYSTEM_NOISE_NAMES.has(name)) return true;
   // Type-based exclusion (Virtual = computed/rollup, EntityName = nav metadata)
   if (SYSTEM_ATTR_TYPES.has(attr.AttributeType)) return true;
   // Lookup-derived display name fields: <lookupname>name, <lookupname>yominame
   for (const suffix of ['name', 'yominame']) {
     if (name.endsWith(suffix)) {
       const base = name.slice(0, -suffix.length);
-      if (lookupNames.has(base) || SYSTEM_ATTR_NAMES.has(base)) return true;
+      if (lookupNames.has(base) || SYSTEM_FIELD_NAMES.has(base)) return true;
     }
   }
   // Polymorphic type indicator: <lookupname>type (e.g. owneridtype)
   if (name.endsWith('type')) {
     const base = name.slice(0, -4);
-    if (lookupNames.has(base) || lookupNames.has(base + 'id') || SYSTEM_ATTR_NAMES.has(base)) return true;
+    if (lookupNames.has(base) || lookupNames.has(base + 'id') || SYSTEM_FIELD_NAMES.has(base)) return true;
   }
   return false;
 }
@@ -196,7 +214,7 @@ export default class ErdViewer {
     this._entityKeyFields = new Map(); // logicalName → FieldInfo[] (PK + FK fields, default view)
     this._entityAllFields = new Map(); // logicalName → FieldInfo[] (all fields, expanded view)
     this._entitySizes = new Map();   // logicalName → { w, h }
-    this._hiddenSystemFKs = new Set(SYSTEM_FK_FIELDS); // system FK field names hidden globally
+    this._hiddenSystemFields = new Set(SYSTEM_FIELD_NAMES); // system field names hidden globally
     this._entityFieldOverrides = new Map(); // logicalName → Set of shown field names (per-entity)
 
     // Adjacency for highlighting
@@ -255,6 +273,29 @@ export default class ErdViewer {
     this._buildToolbar();
     this._buildFilterBar();
     this._buildContent();
+
+    // Wrap toolbar + filter bar in collapsible container
+    const toolbar = this.container.querySelector('.erd-toolbar');
+    const filterBar = this.container.querySelector('.erd-filter-bar');
+    if (toolbar && filterBar) {
+      const controlsWrap = document.createElement('div');
+      controlsWrap.className = 'erd-controls-wrap';
+      toolbar.parentNode.insertBefore(controlsWrap, toolbar);
+      controlsWrap.appendChild(toolbar);
+      controlsWrap.appendChild(filterBar);
+
+      const toggleBar = document.createElement('div');
+      toggleBar.className = 'erd-controls-toggle';
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'erd-btn erd-btn-outline erd-controls-toggle-btn';
+      toggleBtn.textContent = '\u25B2 Hide Controls';
+      toggleBtn.addEventListener('click', () => {
+        const collapsed = controlsWrap.classList.toggle('erd-controls-collapsed');
+        toggleBtn.textContent = collapsed ? '\u25BC Show Controls' : '\u25B2 Hide Controls';
+      });
+      toggleBar.appendChild(toggleBtn);
+      controlsWrap.parentNode.insertBefore(toggleBar, controlsWrap.nextSibling);
+    }
     this._addKeyboardShortcuts();
     await this._loadSolutions();
   }
@@ -348,6 +389,7 @@ export default class ErdViewer {
     });
     this._exportMenuClose = () => { exportMenu.style.display = 'none'; };
     document.addEventListener('click', this._exportMenuClose);
+    exportMenu.addEventListener('click', (e) => e.stopPropagation());
     exportWrap.append(exportBtn, exportMenu);
 
     // Zoom controls
@@ -402,51 +444,28 @@ export default class ErdViewer {
     input.addEventListener('input', () => { this._filterText = input.value; this._applyFilters(); });
     this._filterInput = input;
 
-    const customLabel = document.createElement('label');
-    customLabel.className = 'erd-filter-checkbox';
-    const customCb = document.createElement('input');
-    customCb.type = 'checkbox';
-    customCb.addEventListener('change', () => { this._filterCustomOnly = customCb.checked; this._applyFilters(); });
-    customLabel.append(customCb, ' Custom');
-
-    const sysLabel = document.createElement('label');
-    sysLabel.className = 'erd-filter-checkbox';
-    const sysCb = document.createElement('input');
-    sysCb.type = 'checkbox';
-    sysCb.addEventListener('change', () => { this._filterHideSystem = sysCb.checked; this._applyFilters(); });
-    sysLabel.append(sysCb, ' Hide system');
-
-    // System FK fields toggle dropdown
+    // System fields toggle dropdown
     const fkWrap = document.createElement('div');
     fkWrap.className = 'erd-export-dropdown';
     const fkBtn = document.createElement('button');
     fkBtn.className = 'erd-btn erd-btn-outline';
-    fkBtn.textContent = 'FK Fields \u25BE';
-    fkBtn.title = 'Show/hide system lookup fields on all entities';
+    fkBtn.textContent = 'System Fields \u25BE';
+    fkBtn.title = 'Show/hide system fields on all entities';
     const fkMenu = document.createElement('div');
     fkMenu.className = 'erd-export-menu erd-fk-menu';
     fkMenu.style.display = 'none';
 
-    const fkLabels = [
-      ['createdby', 'Created By'],
-      ['modifiedby', 'Modified By'],
-      ['createdonbehalfby', 'Created By (Delegate)'],
-      ['modifiedonbehalfby', 'Modified By (Delegate)'],
-      ['owningbusinessunit', 'Owning Business Unit'],
-      ['owningteam', 'Owning Team'],
-      ['owninguser', 'Owning User'],
-    ];
-    for (const [fieldName, label] of fkLabels) {
+    for (const [fieldName, label] of SYSTEM_FIELD_ENTRIES) {
       const fkLabel = document.createElement('label');
       fkLabel.className = 'erd-fk-option';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = !this._hiddenSystemFKs.has(fieldName);
+      cb.checked = !this._hiddenSystemFields.has(fieldName);
       cb.addEventListener('change', () => {
         if (cb.checked) {
-          this._hiddenSystemFKs.delete(fieldName);
+          this._hiddenSystemFields.delete(fieldName);
         } else {
-          this._hiddenSystemFKs.add(fieldName);
+          this._hiddenSystemFields.add(fieldName);
         }
         this._renderERD(true);
       });
@@ -461,7 +480,7 @@ export default class ErdViewer {
     showAllBtn.className = 'erd-btn erd-btn-outline';
     showAllBtn.textContent = 'Show all';
     showAllBtn.addEventListener('click', () => {
-      this._hiddenSystemFKs.clear();
+      this._hiddenSystemFields.clear();
       fkMenu.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked = true);
       this._renderERD(true);
     });
@@ -469,7 +488,7 @@ export default class ErdViewer {
     hideAllBtn.className = 'erd-btn erd-btn-outline';
     hideAllBtn.textContent = 'Hide all';
     hideAllBtn.addEventListener('click', () => {
-      for (const [fn] of fkLabels) this._hiddenSystemFKs.add(fn);
+      for (const [fn] of SYSTEM_FIELD_ENTRIES) this._hiddenSystemFields.add(fn);
       fkMenu.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked = false);
       this._renderERD(true);
     });
@@ -510,7 +529,7 @@ export default class ErdViewer {
       this._renderERD(true);
     });
 
-    bar.append(input, customLabel, sysLabel, fkWrap, collapseAllBtn, expandAllBtn);
+    bar.append(input, fkWrap, collapseAllBtn, expandAllBtn);
     this.container.appendChild(bar);
   }
 
@@ -882,9 +901,9 @@ export default class ErdViewer {
       return allFields.filter(f => f.isPk || overrides.has(f.name));
     }
 
-    // Otherwise, filter out hidden system FK fields (unless expanded to show all)
+    // Otherwise, filter out hidden system fields (unless expanded to show all)
     if (isExpanded) return allFields;
-    const filtered = allFields.filter(f => f.isPk || !f.isLookup || !this._hiddenSystemFKs.has(f.name));
+    const filtered = allFields.filter(f => f.isPk || !this._hiddenSystemFields.has(f.name));
     // Cap collapsed view to MAX_KEY_FIELDS
     if (filtered.length > MAX_KEY_FIELDS) {
       return filtered.slice(0, MAX_KEY_FIELDS);
@@ -894,7 +913,7 @@ export default class ErdViewer {
 
   _getUncappedFieldCount(entityName) {
     const allFields = this._entityKeyFields.get(entityName) || [];
-    return allFields.filter(f => f.isPk || !f.isLookup || !this._hiddenSystemFKs.has(f.name)).length;
+    return allFields.filter(f => f.isPk || !this._hiddenSystemFields.has(f.name)).length;
   }
 
   // -------------------------------------------------------------------------
@@ -1093,21 +1112,18 @@ export default class ErdViewer {
     }
 
     // BFS longest-path: child layer = max(parent layer) + 1
-    const visited = new Set();
-    while (queue.length > 0) {
+    // Allow re-visiting to propagate deeper layers through alternative paths
+    let iterations = 0;
+    const maxIter = names.length * 10; // safeguard against cycles
+    while (queue.length > 0 && iterations++ < maxIter) {
       const cur = queue.shift();
-      if (visited.has(cur)) {
-        // Update layer but don't re-queue children if already visited
-        continue;
-      }
-      visited.add(cur);
       const curLayer = layers.get(cur);
       for (const child of children.get(cur)) {
         const newLayer = curLayer + 1;
         if (!layers.has(child) || layers.get(child) < newLayer) {
           layers.set(child, newLayer);
+          queue.push(child); // re-queue to propagate deeper
         }
-        queue.push(child);
       }
     }
 
@@ -1295,23 +1311,35 @@ export default class ErdViewer {
     this._buildWaypointGraph();
     this._isDragging = false;
 
+    // Assign colors to source entities for arrow coloring
+    const entityColorMap = new Map();
+    let colorIdx = 0;
+    for (const rel of this._relationships) {
+      if (!entityColorMap.has(rel.sourceEntity)) {
+        entityColorMap.set(rel.sourceEntity, ARROW_COLORS[colorIdx % ARROW_COLORS.length]);
+        colorIdx++;
+      }
+    }
+
     // Phase 1: Compute all arrow paths
-    const arrowPaths = new Map(); // schemaName → { rel, from, to, d, fx, fy, tx, ty, points }
+    const arrowPaths = new Map(); // schemaName → { rel, d, fx, fy, tx, ty, color }
     for (const rel of this._relationships) {
       const from = this._positions.get(rel.sourceEntity);
       const to = this._positions.get(rel.targetEntity);
       if (!from || !to) continue;
       if (!this._visibleEntities.has(rel.sourceEntity) || !this._visibleEntities.has(rel.targetEntity)) continue;
+      if (rel.sourceEntity === rel.targetEntity) continue; // skip self-refs
       const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
       let d;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
         d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
       }
-      arrowPaths.set(rel.schemaName, { rel, d, fx, fy, tx, ty });
+      const color = entityColorMap.get(rel.sourceEntity);
+      arrowPaths.set(rel.schemaName, { rel, d, fx, fy, tx, ty, color });
     }
 
     // Phase 2: Separate shared segments (post-routing nudge for overlapping paths)
@@ -1329,12 +1357,12 @@ export default class ErdViewer {
     // Add crossing bumps (horizontal lines jump over vertical lines)
     this._addCrossingBumps(arrowGroup);
 
-    // Draw entity boxes
+    // Draw entity boxes (pass color map for header indicator)
     for (const ent of this._entities) {
       if (!this._visibleEntities.has(ent.LogicalName)) continue;
       const pos = this._positions.get(ent.LogicalName);
       if (!pos) continue;
-      this._svgRoot.appendChild(this._drawEntityBox(ent, pos.x, pos.y));
+      this._svgRoot.appendChild(this._drawEntityBox(ent, pos.x, pos.y, entityColorMap.get(ent.LogicalName)));
     }
 
     // Fit SVG viewbox
@@ -1367,7 +1395,7 @@ export default class ErdViewer {
   // Expanded (double-click): ALL fields
   // -------------------------------------------------------------------------
 
-  _drawEntityBox(ent, x, y) {
+  _drawEntityBox(ent, x, y, arrowColor = null) {
     const displayName = ent.DisplayName?.UserLocalizedLabel?.Label || ent.LogicalName;
     const isCustom = ent.IsCustomEntity;
     const isExpanded = this._expanded.get(ent.LogicalName) === true;
@@ -1423,6 +1451,15 @@ export default class ErdViewer {
     });
     toggleText.textContent = isExpanded ? '\u25BC' : `[${allFieldCount}]`;
     g.appendChild(toggleText);
+
+    // Arrow color indicator (left edge bar showing outgoing relationship color)
+    if (arrowColor) {
+      const indicator = svgEl('rect', {
+        x: 0, y: 0, width: 4, height: HEADER_H, rx: 2,
+      });
+      indicator.style.fill = arrowColor;
+      g.appendChild(indicator);
+    }
 
     // Separator and fields (always shown)
     g.appendChild(svgEl('line', { x1: 0, y1: HEADER_H, x2: ENTITY_W, y2: HEADER_H, class: 'erd-separator' }));
@@ -1522,7 +1559,7 @@ export default class ErdViewer {
       if (currentOverrides) {
         cb.checked = currentOverrides.has(f.name);
       } else {
-        cb.checked = !f.isLookup || !this._hiddenSystemFKs.has(f.name);
+        cb.checked = !this._hiddenSystemFields.has(f.name);
       }
       cb.addEventListener('change', () => {
         // Initialize overrides from current visibility if first interaction
@@ -1530,7 +1567,7 @@ export default class ErdViewer {
           const visible = new Set();
           for (const ff of allFields) {
             if (ff.isPk) continue;
-            if (!ff.isLookup || !this._hiddenSystemFKs.has(ff.name)) visible.add(ff.name);
+            if (!this._hiddenSystemFields.has(ff.name)) visible.add(ff.name);
           }
           this._entityFieldOverrides.set(ent.LogicalName, visible);
         }
@@ -1654,7 +1691,7 @@ export default class ErdViewer {
     // Path
     let d;
     if (this._routingMode === 'orthogonal') {
-      d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+      d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
     } else {
       const midX = (fx + tx) / 2;
       const midY = (fy + ty) / 2;
@@ -1712,8 +1749,8 @@ export default class ErdViewer {
     return g;
   }
 
-  /** Draw an arrow from a pre-computed path entry { rel, d, fx, fy, tx, ty }. */
-  _drawArrowFromPath({ rel, d, fx, fy, tx, ty }) {
+  /** Draw an arrow from a pre-computed path entry { rel, d, fx, fy, tx, ty, color }. */
+  _drawArrowFromPath({ rel, d, fx, fy, tx, ty, color }) {
     let markerStart, markerEnd, cssClass;
     if (rel.type === '1:N') {
       markerStart = 'url(#cf-one-one)';
@@ -1751,10 +1788,15 @@ export default class ErdViewer {
     const pathAttrs = { d, class: cssClass, fill: 'none' };
     if (markerStart) pathAttrs['marker-start'] = markerStart;
     if (markerEnd) pathAttrs['marker-end'] = markerEnd;
-    g.appendChild(svgEl('path', pathAttrs));
+    const pathEl = svgEl('path', pathAttrs);
+    if (color) pathEl.style.stroke = color;
+    g.appendChild(pathEl);
 
-    g.appendChild(svgEl('circle', { cx: fx, cy: fy, r: 3, class: 'erd-connection-dot' }));
-    g.appendChild(svgEl('circle', { cx: tx, cy: ty, r: 3, class: 'erd-connection-dot' }));
+    const dot1 = svgEl('circle', { cx: fx, cy: fy, r: 3, class: 'erd-connection-dot' });
+    const dot2 = svgEl('circle', { cx: tx, cy: ty, r: 3, class: 'erd-connection-dot' });
+    if (color) { dot1.style.fill = color; dot2.style.fill = color; }
+    g.appendChild(dot1);
+    g.appendChild(dot2);
 
     return g;
   }
@@ -1825,7 +1867,7 @@ export default class ErdViewer {
     const segs = [];
     // Parse M, L, H, V commands and collect axis-aligned segments
     const coords = [];
-    const parts = d.match(/[MLHVQC][^MLHVQC]*/gi) || [];
+    const parts = d.match(/[MLHVQCA][^MLHVQCA]*/gi) || [];
     let cx = 0, cy = 0;
     for (const part of parts) {
       const cmd = part[0].toUpperCase();
@@ -1899,7 +1941,7 @@ export default class ErdViewer {
     // Simple approach: adjust all numeric coordinates
     // We only shift H coordinates by dx and V coordinates by dy
     // For M, L, Q, C we shift both
-    const parts = d.match(/[MLHVQC][^MLHVQC]*/gi) || [];
+    const parts = d.match(/[MLHVQCA][^MLHVQCA]*/gi) || [];
     const shifted = parts.map((part, idx) => {
       const cmd = part[0].toUpperCase();
       const nums = part.slice(1).trim().split(/[\s,]+/).map(Number);
@@ -1911,6 +1953,7 @@ export default class ErdViewer {
       if (cmd === 'M' || cmd === 'L') return `${cmd} ${nums[0] + dx} ${nums[1] + dy}`;
       if (cmd === 'Q') return `Q ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy}`;
       if (cmd === 'C') return `C ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy} ${nums[4] + dx} ${nums[5] + dy}`;
+      if (cmd === 'A') return `A ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5] + dx} ${nums[6] + dy}`;
       return part;
     });
     return shifted.join(' ');
@@ -2011,11 +2054,12 @@ export default class ErdViewer {
   // Orthogonal edge routing — A* pathfinding on entity-corner waypoints
   // -------------------------------------------------------------------------
 
-  static STUB_LEN = 15; // straight entry/exit stub length
-  static ROUTE_MARGIN = 16; // margin around entity boxes for routing
+  static STUB_LEN = 30; // straight entry/exit stub length (increased for cleaner bends)
+  static STUB_SPREAD = 8; // extra stub per additional arrow on same side
+  static ROUTE_MARGIN = 20; // margin around entity boxes for routing
   static BEND_PENALTY = 30; // A* cost penalty per direction change
 
-  _computeOrthogonalPath(fx, fy, tx, ty, laneOffset = 0, srcEntity = null, tgtEntity = null) {
+  _computeOrthogonalPath(fx, fy, tx, ty, laneOffset = 0, srcEntity = null, tgtEntity = null, rel = null) {
     // During drag use fast simplified routing
     if (this._isDragging) {
       return this._computeSimplePath(fx, fy, tx, ty, laneOffset);
@@ -2024,12 +2068,15 @@ export default class ErdViewer {
     const exitDir = this._getExitDirection(fx, fy, srcEntity);
     const entryDir = this._getExitDirection(tx, ty, tgtEntity);
 
-    // Compute stubs: 15px straight out from entity before A* takes over
-    const stub = ErdViewer.STUB_LEN;
-    const sfx = fx + exitDir.dx * stub;
-    const sfy = fy + exitDir.dy * stub;
-    const stx = tx + entryDir.dx * stub;
-    const sty = ty + entryDir.dy * stub;
+    // Compute stubs: variable length so multiple arrows at same side spread out
+    const srcPortIdx = this._getPortIndex(srcEntity, rel?.schemaName, 'src');
+    const tgtPortIdx = this._getPortIndex(tgtEntity, rel?.schemaName, 'tgt');
+    const stubSrc = ErdViewer.STUB_LEN + srcPortIdx * ErdViewer.STUB_SPREAD;
+    const stubTgt = ErdViewer.STUB_LEN + tgtPortIdx * ErdViewer.STUB_SPREAD;
+    const sfx = fx + exitDir.dx * stubSrc;
+    const sfy = fy + exitDir.dy * stubSrc;
+    const stx = tx + entryDir.dx * stubTgt;
+    const sty = ty + entryDir.dy * stubTgt;
 
     // Find A* path between stub endpoints
     const astarPath = this._findOrthogonalPath(sfx, sfy, stx, sty, srcEntity, tgtEntity);
@@ -2094,6 +2141,21 @@ export default class ErdViewer {
     if (rc < 1) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
     const sy1 = Math.sign(dy1), sx = Math.sign(dx), sy2 = Math.sign(dy2);
     return `M ${fx} ${fy} V ${midY - rc * sy1} Q ${fx} ${midY} ${fx + rc * sx} ${midY} H ${tx - rc * sx} Q ${tx} ${midY} ${tx} ${midY + rc * sy2} V ${ty}`;
+  }
+
+  /** Get the index of an arrow on its entity side (for variable stub length). */
+  _getPortIndex(entityName, schemaName, role) {
+    if (!entityName || !schemaName || !this._portOffsets) return 0;
+    const key = `${entityName}:${role}:${schemaName}`;
+    // Count how many arrows share this entity+side
+    let count = 0, idx = 0;
+    for (const k of this._portOffsets.keys()) {
+      if (k.startsWith(entityName + ':' + role + ':')) {
+        if (k === key) idx = count;
+        count++;
+      }
+    }
+    return count <= 1 ? 0 : idx;
   }
 
   /** Get the exit direction unit vector for a connection point on an entity. */
@@ -2237,6 +2299,21 @@ export default class ErdViewer {
     return false;
   }
 
+  /** Check if two points can connect via 1 or 2 axis-aligned segments without hitting obstacles. */
+  _canReachLPath(ax, ay, bx, by, excludeNames) {
+    // Direct horizontal
+    if (Math.abs(ay - by) < 1 && !this._segmentHitsObstacle(ax, ay, bx, ay, excludeNames)) return true;
+    // Direct vertical
+    if (Math.abs(ax - bx) < 1 && !this._segmentHitsObstacle(ax, ay, ax, by, excludeNames)) return true;
+    // L-path: H then V
+    if (!this._segmentHitsObstacle(ax, ay, bx, ay, excludeNames) &&
+        !this._segmentHitsObstacle(bx, ay, bx, by, excludeNames)) return true;
+    // L-path: V then H
+    if (!this._segmentHitsObstacle(ax, ay, ax, by, excludeNames) &&
+        !this._segmentHitsObstacle(ax, by, bx, by, excludeNames)) return true;
+    return false;
+  }
+
   /** A* orthogonal pathfinder between two points, avoiding all entity boxes. */
   _findOrthogonalPath(fx, fy, tx, ty, srcEntity, tgtEntity) {
     const excludeNames = new Set();
@@ -2286,24 +2363,28 @@ export default class ErdViewer {
     tempAdj[srcIdx] = [];
     tempAdj[tgtIdx] = [];
 
-    // Connect start/end to reachable waypoints (same axis, clear line-of-sight)
+    // Connect start/end to reachable waypoints via same-axis OR L-path (2-segment)
     for (let i = 0; i < wps.length; i++) {
       const wi = i + 1;
-      // Source connections
-      if ((Math.abs(nodeY[srcIdx] - nodeY[wi]) < 1 || Math.abs(nodeX[srcIdx] - nodeX[wi]) < 1) &&
-          !this._segmentHitsObstacle(nodeX[srcIdx], nodeY[srcIdx], nodeX[wi], nodeY[wi], excludeNames)) {
+      const wx = nodeX[wi], wy = nodeY[wi];
+
+      // Source → waypoint reachability
+      if (this._canReachLPath(nodeX[srcIdx], nodeY[srcIdx], wx, wy, excludeNames)) {
         tempAdj[srcIdx].push(wi);
         tempAdj[wi] = [...tempAdj[wi], srcIdx];
       }
-      // Target connections
-      if ((Math.abs(nodeY[tgtIdx] - nodeY[wi]) < 1 || Math.abs(nodeX[tgtIdx] - nodeX[wi]) < 1) &&
-          !this._segmentHitsObstacle(nodeX[tgtIdx], nodeY[tgtIdx], nodeX[wi], nodeY[wi], excludeNames)) {
+      // Target → waypoint reachability
+      if (this._canReachLPath(nodeX[tgtIdx], nodeY[tgtIdx], wx, wy, excludeNames)) {
         tempAdj[tgtIdx].push(wi);
         tempAdj[wi] = [...tempAdj[wi], tgtIdx];
       }
     }
 
-    // Also check direct src→tgt on adjacency (already handled above via quick checks, but cover shifted coords)
+    // Direct src→tgt
+    if (this._canReachLPath(fx, fy, tx, ty, excludeNames)) {
+      tempAdj[srcIdx].push(tgtIdx);
+      tempAdj[tgtIdx] = [...tempAdj[tgtIdx], srcIdx];
+    }
 
     // Direction helper for bend detection
     const getDir = (ai, bi) => {
@@ -2355,11 +2436,28 @@ export default class ErdViewer {
       return this._computeDetourPath(fx, fy, tx, ty);
     }
 
-    const path = [];
+    const rawPath = [];
     let ci = tgtIdx;
     while (ci >= 0) {
-      path.unshift({ x: nodeX[ci], y: nodeY[ci] });
+      rawPath.unshift({ x: nodeX[ci], y: nodeY[ci] });
       ci = prev[ci];
+    }
+
+    // Expand non-axis-aligned hops into orthogonal corners
+    const path = [rawPath[0]];
+    for (let i = 1; i < rawPath.length; i++) {
+      const a = path[path.length - 1];
+      const b = rawPath[i];
+      if (Math.abs(a.x - b.x) > 1 && Math.abs(a.y - b.y) > 1) {
+        // Not axis-aligned → insert a corner (try H-then-V first, fallback to V-then-H)
+        if (!this._segmentHitsObstacle(a.x, a.y, b.x, a.y, excludeNames) &&
+            !this._segmentHitsObstacle(b.x, a.y, b.x, b.y, excludeNames)) {
+          path.push({ x: b.x, y: a.y });
+        } else {
+          path.push({ x: a.x, y: b.y });
+        }
+      }
+      path.push(b);
     }
 
     return path;
@@ -2467,7 +2565,7 @@ export default class ErdViewer {
       if (!d) return;
       // Parse path into coordinate pairs by tracking M, H, V, L commands
       // (ignore Q/C arcs — they're tiny corner radii)
-      const tokens = d.match(/[MHVLQC][\s\d.e+-,]*/gi);
+      const tokens = d.match(/[MHVLQCA][^MHVLQCA]*/gi);
       if (!tokens) return;
 
       let cx = 0, cy = 0;
@@ -2486,6 +2584,7 @@ export default class ErdViewer {
         } else if (cmd === 'L' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
         else if (cmd === 'Q' && nums.length >= 4) { cx = nums[2]; cy = nums[3]; }
         else if (cmd === 'C' && nums.length >= 6) { cx = nums[4]; cy = nums[5]; }
+        else if (cmd === 'A' && nums.length >= 7) { cx = nums[5]; cy = nums[6]; }
       }
     });
 
@@ -2517,7 +2616,7 @@ export default class ErdViewer {
 
       // Replace H segments that contain bump points
       // Strategy: parse and rebuild the path
-      const tokens = d.match(/[MHVLQC][\s\d.e+-,]*/gi);
+      const tokens = d.match(/[MHVLQCA][^MHVLQCA]*/gi);
       if (!tokens) continue;
 
       const parts = [];
@@ -2547,16 +2646,32 @@ export default class ErdViewer {
             }
             parts.push(`H ${nx}`);
           } else {
-            parts.push(tok);
+            parts.push(`H ${nx}`);
           }
           cx = nx;
         } else {
-          parts.push(tok);
-          if (cmd === 'M' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
-          else if (cmd === 'V' && nums.length >= 1) cy = nums[0];
-          else if (cmd === 'L' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
-          else if (cmd === 'Q' && nums.length >= 4) { cx = nums[2]; cy = nums[3]; }
-          else if (cmd === 'C' && nums.length >= 6) { cx = nums[4]; cy = nums[5]; }
+          // Reconstruct command from parsed values to avoid passing through garbled tokens
+          if (cmd === 'M' && nums.length >= 2) {
+            parts.push(`M ${nums[0]} ${nums[1]}`);
+            cx = nums[0]; cy = nums[1];
+          } else if (cmd === 'V' && nums.length >= 1) {
+            parts.push(`V ${nums[0]}`);
+            cy = nums[0];
+          } else if (cmd === 'L' && nums.length >= 2) {
+            parts.push(`L ${nums[0]} ${nums[1]}`);
+            cx = nums[0]; cy = nums[1];
+          } else if (cmd === 'Q' && nums.length >= 4) {
+            parts.push(`Q ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]}`);
+            cx = nums[2]; cy = nums[3];
+          } else if (cmd === 'C' && nums.length >= 6) {
+            parts.push(`C ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5]}`);
+            cx = nums[4]; cy = nums[5];
+          } else if (cmd === 'A' && nums.length >= 7) {
+            parts.push(`A ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5]} ${nums[6]}`);
+            cx = nums[5]; cy = nums[6];
+          } else {
+            parts.push(tok);
+          }
         }
       }
 
@@ -2684,7 +2799,7 @@ export default class ErdViewer {
       let d;
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
         d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
@@ -2723,7 +2838,7 @@ export default class ErdViewer {
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
       let d;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity);
+        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
         d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;

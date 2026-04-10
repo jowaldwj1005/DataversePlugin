@@ -112,12 +112,14 @@ export class AgentRunner {
 
       if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-      // Update thinking step
+      // Update thinking step — don't show reasoning here if it's the final "done" response
+      // (the main module renders reasoning as the final content to avoid duplication)
+      const isTerminal = parsed.status === 'done' || parsed.status === 'error';
       this.#onStep({
         id: thinkStepId,
         type: 'thinking',
         label: iteration === 0 ? 'Analyzed request' : 'Processed',
-        reasoning: parsed.reasoning || null,
+        reasoning: isTerminal ? null : (parsed.reasoning || null),
         status: 'done',
         startedAt: performance.now(),
         completedAt: performance.now(),
@@ -220,6 +222,8 @@ export class AgentRunner {
       status: stepStatus,
       startedAt: performance.now(),
       completedAt: performance.now(),
+      toolCall: { toolId, params },
+      toolResult: result.data,
     });
 
     // Append to conversation

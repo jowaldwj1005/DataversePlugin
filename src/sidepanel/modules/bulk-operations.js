@@ -29,6 +29,95 @@ const DEFAULT_THROTTLE_MS = 100;
 const BATCH_BOUNDARY = 'batch_dataverse_toolkit';
 const CHANGESET_BOUNDARY_PREFIX = 'changeset_';
 
+const AGENT_ENTITY_BUILDER_PROMPT = `You are a Dataverse solution architect. The user will describe a project or business domain. Your job is to:
+
+1. Identify all necessary custom Dataverse entities (tables) for that domain
+2. Define their attributes (columns) with correct types
+3. Define lookup relationships between entities
+4. Output a single JSON array that can be pasted directly into a Dataverse Bulk Operations tool
+
+Output format:
+Output ONLY a JSON array. Each element is one Dataverse Metadata API operation:
+[{ "method": "POST", "url": "...", "body": { ... } }, ...]
+
+Operation ordering rules (CRITICAL):
+1. Parent entities first — any entity that other entities look up to must be created before the child
+2. All entities before relationships — RelationshipDefinitions operations come after both entities exist
+3. Extra attributes after their entity — EntityDefinitions(LogicalName='...')/Attributes comes after the entity POST
+
+Entity creation — URL: EntityDefinitions
+Always include the primary name attribute inline in Attributes:
+{
+  "method": "POST",
+  "url": "EntityDefinitions",
+  "body": {
+    "@odata.type": "Microsoft.Dynamics.CRM.EntityMetadata",
+    "SchemaName": "new_Project",
+    "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Project", "LanguageCode": 1033 }] },
+    "DisplayCollectionName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Projects", "LanguageCode": 1033 }] },
+    "OwnershipType": "UserOwned",
+    "HasActivities": false,
+    "HasNotes": false,
+    "PrimaryNameAttribute": "new_name",
+    "Attributes": [{
+      "@odata.type": "Microsoft.Dynamics.CRM.StringAttributeMetadata",
+      "SchemaName": "new_name",
+      "RequiredLevel": { "Value": "ApplicationRequired" },
+      "MaxLength": 100,
+      "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Name", "LanguageCode": 1033 }] }
+    }]
+  }
+}
+
+Extra attributes — URL: EntityDefinitions(LogicalName='new_project')/Attributes
+Type mapping:
+- Text (short):  StringAttributeMetadata  — add MaxLength (max 4000)
+- Text (long):   MemoAttributeMetadata    — add MaxLength (max 1048576)
+- Whole Number:  IntegerAttributeMetadata — add MinValue, MaxValue
+- Decimal:       DecimalAttributeMetadata — add MinValue, MaxValue, Precision
+- Currency:      MoneyAttributeMetadata   — add MinValue, MaxValue, Precision
+- Yes/No:        BooleanAttributeMetadata — add OptionSet with TrueOption/FalseOption
+- Date/Time:     DateTimeAttributeMetadata — add DateTimeBehavior: { "Value": "UserLocal" }
+- Choice:        PicklistAttributeMetadata — add OptionSet with Options array
+All @odata.type values use the Microsoft.Dynamics.CRM. prefix.
+
+Lookup relationships (N:1) — URL: RelationshipDefinitions
+NEVER create a lookup attribute manually — use RelationshipDefinitions (creates the lookup field automatically):
+{
+  "method": "POST",
+  "url": "RelationshipDefinitions",
+  "body": {
+    "@odata.type": "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata",
+    "SchemaName": "new_project_new_task",
+    "ReferencedEntity": "new_project",
+    "ReferencingEntity": "new_task",
+    "ReferencedAttribute": "new_projectid",
+    "Lookup": {
+      "@odata.type": "Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "SchemaName": "new_ProjectId",
+      "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Project", "LanguageCode": 1033 }] },
+      "RequiredLevel": { "Value": "None" }
+    },
+    "AssociatedMenuConfiguration": { "Behavior": "UseCollectionName", "Group": "Details", "Order": 10000 },
+    "CascadeConfiguration": { "Assign": "NoCascade", "Delete": "RemoveLink", "Merge": "NoCascade", "Reparent": "NoCascade", "Share": "NoCascade", "Unshare": "NoCascade" }
+  }
+}
+
+Naming conventions:
+- Custom prefix: "new_" unless user specifies a publisher prefix
+- SchemaName: PascalCase (new_ProjectName)
+- LogicalName in URLs: always lowercase (new_projectname)
+- Primary ID: <logicalname>id (e.g. new_projectid)
+- Relationship SchemaName: <parent>_<child> (e.g. new_project_new_task)
+
+What NOT to include:
+- Do not create standard entities (account, contact, etc.) — they already exist
+- Do not manually create lookup attributes — use RelationshipDefinitions
+- Do not add statecode/statuscode — auto-created by Dataverse
+- Do not set IsCustomizable, IsAuditEnabled unless explicitly requested
+
+Now describe your project and I will generate the JSON array.`;
+
 /**
  * @typedef {Object} BulkOperation
  * @property {string} id              - Unique identifier
@@ -460,6 +549,15 @@ export class BulkOperations {
       cards.appendChild(card);
     }
 
+    // AI Agent Prompt card
+    const aiCard = document.createElement('div');
+    aiCard.className = 'bulk-welcome-card';
+    aiCard.innerHTML = `<span class="bulk-welcome-icon">\uD83E\uDD16</span>
+      <span class="bulk-welcome-name">AI Entity Builder</span>
+      <span class="bulk-welcome-desc">Copy a prompt for an AI agent to generate entity creation JSON</span>`;
+    aiCard.addEventListener('click', () => this._showAgentPrompt());
+    cards.appendChild(aiCard);
+
     // Manual JSON card
     const manualCard = document.createElement('div');
     manualCard.className = 'bulk-welcome-card bulk-welcome-card-manual';
@@ -481,6 +579,45 @@ export class BulkOperations {
 
     grid.appendChild(cards);
     this.container.appendChild(grid);
+  }
+
+  /** Show overlay with copiable AI agent prompt for entity creation. */
+  _showAgentPrompt() {
+    const overlay = this._createOverlay();
+    const dialog = document.createElement('div');
+    dialog.className = 'bulk-dialog';
+    dialog.style.cssText = 'max-width:580px; max-height:80vh; display:flex; flex-direction:column;';
+
+    const title = document.createElement('div');
+    title.className = 'bulk-dialog-title';
+    title.textContent = 'AI Entity Builder — Prompt';
+    dialog.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:0.75rem; color:var(--color-text-muted); margin-bottom:8px;';
+    hint.textContent = 'Copy this prompt and paste it into any AI chat (Claude, ChatGPT, etc.). Describe your project and the AI will output a JSON array you can paste into Bulk Ops.';
+    dialog.appendChild(hint);
+
+    const pre = document.createElement('pre');
+    pre.className = 'bulk-json-agent-prompt-pre';
+    pre.textContent = AGENT_ENTITY_BUILDER_PROMPT;
+    dialog.appendChild(pre);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:6px; margin-top:8px;';
+
+    const copyBtn = this._createButton('Copy Prompt', 'btn-primary', () => {
+      navigator.clipboard.writeText(pre.textContent).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy Prompt'; }, 1500);
+      });
+    });
+    const closeBtn = this._createButton('Close', 'btn-secondary', () => overlay.remove());
+    btnRow.append(copyBtn, closeBtn);
+    dialog.appendChild(btnRow);
+
+    overlay.appendChild(dialog);
+    this.container.appendChild(overlay);
   }
 
   /** Build the primary JSON paste panel shown above the operation list. */
@@ -567,142 +704,6 @@ export class BulkOperations {
     });
     panel.appendChild(exampleToggle);
     panel.appendChild(exampleBlock);
-
-    // AI agent prompt toggler
-    const agentPromptToggle = document.createElement('button');
-    agentPromptToggle.className = 'bulk-json-example-btn';
-    agentPromptToggle.textContent = 'Show AI agent prompt';
-
-    const agentPromptWrapper = document.createElement('div');
-    agentPromptWrapper.className = 'bulk-json-agent-prompt';
-    agentPromptWrapper.style.display = 'none';
-
-    const agentCopyBtn = document.createElement('button');
-    agentCopyBtn.className = 'bulk-json-agent-copy-btn';
-    agentCopyBtn.textContent = 'Copy';
-    agentCopyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(agentPromptPre.textContent).then(() => {
-        agentCopyBtn.textContent = 'Copied!';
-        setTimeout(() => { agentCopyBtn.textContent = 'Copy'; }, 1500);
-      });
-    });
-
-    const agentPromptPre = document.createElement('pre');
-    agentPromptPre.className = 'bulk-json-agent-prompt-pre';
-    agentPromptPre.textContent = `You are a Dataverse solution architect. The user will describe a project or business domain. Your job is to:
-
-1. Identify all necessary custom Dataverse entities (tables) for that domain
-2. Define their attributes (columns) with correct types
-3. Define lookup relationships between entities
-4. Output a single JSON array that can be pasted directly into a Dataverse Bulk Operations tool
-
----
-
-Output format:
-Output exactly one JSON array, nothing else after it. Each element is one Dataverse Metadata API operation:
-[ { "method": "POST", "url": "...", "body": { ... } }, ... ]
-
----
-
-Operation ordering rules — CRITICAL:
-1. Parent entities first — any entity that other entities look up to must be created before the child entity
-2. All entities before relationships — RelationshipDefinitions operations come after both entities they connect exist
-3. Attributes added after their entity — extra attributes come after the entity creation
-
----
-
-Entity creation — URL: EntityDefinitions
-
-Always include the primary name attribute inline in Attributes:
-{
-  "method": "POST",
-  "url": "EntityDefinitions",
-  "body": {
-    "@odata.type": "Microsoft.Dynamics.CRM.EntityMetadata",
-    "SchemaName": "new_Project",
-    "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Project", "LanguageCode": 1033 }] },
-    "DisplayCollectionName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Projects", "LanguageCode": 1033 }] },
-    "OwnershipType": "UserOwned",
-    "HasActivities": false,
-    "HasNotes": false,
-    "PrimaryNameAttribute": "new_name",
-    "Attributes": [{
-      "@odata.type": "Microsoft.Dynamics.CRM.StringAttributeMetadata",
-      "SchemaName": "new_name",
-      "RequiredLevel": { "Value": "ApplicationRequired" },
-      "MaxLength": 100,
-      "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Name", "LanguageCode": 1033 }] }
-    }]
-  }
-}
-
----
-
-Adding extra attributes — URL: EntityDefinitions(LogicalName='new_project')/Attributes
-
-Attribute type mapping:
-- Text (short):  "@odata.type": "Microsoft.Dynamics.CRM.StringAttributeMetadata"  — add MaxLength (max 4000)
-- Text (long):   "@odata.type": "Microsoft.Dynamics.CRM.MemoAttributeMetadata"    — add MaxLength (max 1048576)
-- Whole Number:  "@odata.type": "Microsoft.Dynamics.CRM.IntegerAttributeMetadata" — add MinValue, MaxValue
-- Decimal:       "@odata.type": "Microsoft.Dynamics.CRM.DecimalAttributeMetadata" — add MinValue, MaxValue, Precision
-- Currency:      "@odata.type": "Microsoft.Dynamics.CRM.MoneyAttributeMetadata"   — add MinValue, MaxValue, Precision
-- Yes/No:        "@odata.type": "Microsoft.Dynamics.CRM.BooleanAttributeMetadata" — add OptionSet with TrueOption/FalseOption
-- Date/Time:     "@odata.type": "Microsoft.Dynamics.CRM.DateTimeAttributeMetadata" — add DateTimeBehavior: { "Value": "UserLocal" }
-- Choice:        "@odata.type": "Microsoft.Dynamics.CRM.PicklistAttributeMetadata" — add OptionSet with Options array
-
----
-
-Lookup relationships (N:1 from child to parent) — URL: RelationshipDefinitions
-Never create a lookup attribute manually — use RelationshipDefinitions instead (it creates the lookup field automatically).
-
-{
-  "method": "POST",
-  "url": "RelationshipDefinitions",
-  "body": {
-    "@odata.type": "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata",
-    "SchemaName": "new_project_new_task",
-    "ReferencedEntity": "new_project",
-    "ReferencingEntity": "new_task",
-    "ReferencedAttribute": "new_projectid",
-    "Lookup": {
-      "@odata.type": "Microsoft.Dynamics.CRM.LookupAttributeMetadata",
-      "SchemaName": "new_ProjectId",
-      "DisplayName": { "@odata.type": "Microsoft.Dynamics.CRM.Label", "LocalizedLabels": [{ "@odata.type": "Microsoft.Dynamics.CRM.LocalizedLabel", "Label": "Project", "LanguageCode": 1033 }] },
-      "RequiredLevel": { "Value": "None" }
-    },
-    "AssociatedMenuConfiguration": { "Behavior": "UseCollectionName", "Group": "Details", "Order": 10000 },
-    "CascadeConfiguration": { "Assign": "NoCascade", "Delete": "RemoveLink", "Merge": "NoCascade", "Reparent": "NoCascade", "Share": "NoCascade", "Unshare": "NoCascade" }
-  }
-}
-
----
-
-Naming conventions:
-- Custom schema names use prefix "new_" (e.g. new_Project, new_Task) unless the user specifies a publisher prefix
-- SchemaName is PascalCase: new_ProjectName
-- LogicalName (used in URLs) is always lowercase: new_projectname
-- Primary ID attribute: <entitylogicalname>id (e.g. new_projectid)
-- Relationship SchemaName: <parent_logicalname>_<child_logicalname>
-
-What NOT to include:
-- Do not create standard Dataverse system entities (account, contact, etc.) — they already exist
-- Do not manually create a lookup attribute — use RelationshipDefinitions instead
-- Do not add statecode/statuscode — Dataverse creates these automatically
-- Do not set IsCustomizable, IsAuditEnabled or other optional metadata flags unless explicitly requested
-
----
-
-Now describe your project and I will generate the JSON array.`;
-
-    agentPromptWrapper.append(agentCopyBtn, agentPromptPre);
-
-    agentPromptToggle.addEventListener('click', () => {
-      const shown = agentPromptWrapper.style.display !== 'none';
-      agentPromptWrapper.style.display = shown ? 'none' : '';
-      agentPromptToggle.textContent = shown ? 'Show AI agent prompt' : 'Hide AI agent prompt';
-    });
-    panel.appendChild(agentPromptToggle);
-    panel.appendChild(agentPromptWrapper);
 
     // Dynamic textarea (auto-resizes with content)
     import('./bulk-ops/dynamic-textarea.js').then(({ createDynamicTextarea }) => {

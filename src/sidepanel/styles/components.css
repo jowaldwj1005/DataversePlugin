@@ -1908,35 +1908,20 @@
 .bulk-json-textarea:focus { outline: none; border-color: var(--color-accent-primary); box-shadow: 0 0 0 1px var(--color-border-focus); }
 .bulk-json-error { font-size: 0.78rem; color: var(--color-error); margin: 4px 0; }
 .bulk-json-actions { display: flex; gap: 6px; margin-top: 6px; }
-.bulk-json-agent-prompt { position: relative; margin-bottom: 6px; }
 .bulk-json-agent-prompt-pre {
   font-size: 0.72rem;
   font-family: Consolas, monospace;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 8px 8px 8px 8px;
-  padding-top: 28px;
+  padding: 8px;
   overflow-x: auto;
   white-space: pre-wrap;
   color: var(--color-text-muted);
-  max-height: 220px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
-.bulk-json-agent-copy-btn {
-  position: absolute;
-  top: 5px;
-  right: 6px;
-  font-size: 0.7rem;
-  padding: 2px 8px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  z-index: 1;
-}
-.bulk-json-agent-copy-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 /* --- Buttons (full system) ------------------------------------------- */
 .bulk-btn {
@@ -3110,6 +3095,30 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
   font-size: 0.875rem;
 }
 
+/* Collapsible controls wrapper */
+.erd-controls-wrap {
+  flex-shrink: 0;
+  transition: max-height 0.25s ease;
+  max-height: 200px;
+}
+.erd-controls-wrap.erd-controls-collapsed {
+  max-height: 0;
+  overflow: hidden;
+}
+.erd-controls-toggle {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0;
+  background: var(--color-bg-sidebar);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.erd-controls-toggle-btn {
+  font-size: 0.7rem !important;
+  padding: 1px 12px !important;
+  opacity: 0.7;
+}
+
 /* Toolbar */
 .erd-toolbar {
   display: flex;
@@ -3387,17 +3396,16 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
   fill: #c586c0;
 }
 
-/* Relationship arrows */
+/* Relationship arrows — colored arrows use inline style to override */
 .erd-arrow {
   stroke: var(--color-border-strong);
-  stroke-width: 1.5;
-  opacity: 0.7;
+  stroke-width: 2;
+  opacity: 0.75;
   transition: opacity var(--transition-normal);
 }
 .erd-arrow-dashed  { stroke-dasharray: 4 3; }
 .erd-arrow-dotted  { stroke-dasharray: 2 2; }
 .erd-arrow-nn {
-  stroke: var(--color-accent-secondary, #569cd6);
   stroke-dasharray: 3 3;
   opacity: 0.6;
 }
@@ -3432,7 +3440,7 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 
 .erd-arrow-group.erd-highlighted .erd-arrow {
   opacity: 1;
-  stroke-width: 2;
+  stroke-width: 2.5;
 }
 
 /* Minimap */
