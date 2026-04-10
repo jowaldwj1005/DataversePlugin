@@ -140,6 +140,24 @@
 
   /* Backdrop blur */
   --backdrop-blur: blur(8px);
+
+  /* ERD Pro */
+  --erdp-card-bg: #2a2a2e;
+  --erdp-card-border: #3e3e42;
+  --erdp-header-system: #2d333b;
+  --erdp-header-custom: rgba(0, 120, 212, 0.18);
+  --erdp-type-string: #569cd6;
+  --erdp-type-number: #4ec9b0;
+  --erdp-type-datetime: #ce9178;
+  --erdp-type-optionset: #dcdcaa;
+  --erdp-type-boolean: #9cdcfe;
+  --erdp-type-lookup: #c586c0;
+  --erdp-type-uniqueid: #7c858d;
+  --erdp-type-image: #d19a66;
+  --erdp-rel-1n: #6bc5e8;
+  --erdp-rel-nn: #a78bfa;
+  --erdp-rel-self: #f9a857;
+  --erdp-required: #e06c75;
 }
 
 /* ----------------------------------------------------------------
@@ -240,6 +258,24 @@
   /* Skeleton / Loading */
   --skeleton-base: #e8e8e8;
   --skeleton-shimmer: #f5f5f5;
+
+  /* ERD Pro */
+  --erdp-card-bg: #ffffff;
+  --erdp-card-border: #d0d0d0;
+  --erdp-header-system: #f0f2f5;
+  --erdp-header-custom: rgba(0, 120, 212, 0.1);
+  --erdp-type-string: #0451a5;
+  --erdp-type-number: #098658;
+  --erdp-type-datetime: #9c5d27;
+  --erdp-type-optionset: #7a6e2e;
+  --erdp-type-boolean: #0070c1;
+  --erdp-type-lookup: #af00db;
+  --erdp-type-uniqueid: #6b7280;
+  --erdp-type-image: #a0522d;
+  --erdp-rel-1n: #0078d4;
+  --erdp-rel-nn: #7c3aed;
+  --erdp-rel-self: #d97706;
+  --erdp-required: #d13438;
 }
 
 /* ----------------------------------------------------------------

@@ -2126,19 +2126,21 @@ export default class ErdViewer {
 
   /** Fast 3-segment path for drag mode (no A*). */
   _computeSimplePath(fx, fy, tx, ty, laneOffset = 0) {
+    // Degenerate: source and target at same point
+    if (Math.abs(tx - fx) < 1 && Math.abs(ty - fy) < 1) return `M ${fx} ${fy}`;
     const midX = (fx + tx) / 2 + laneOffset;
     const midY = (fy + ty) / 2 + laneOffset;
     const r = CORNER_R;
     if (Math.abs(tx - fx) > Math.abs(ty - fy)) {
       const dx1 = midX - fx, dy = ty - fy, dx2 = tx - midX;
       const rc = Math.min(r, Math.abs(dx1) / 2, Math.abs(dy) / 2, Math.abs(dx2) / 2);
-      if (rc < 1) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
+      if (rc < 1 || dy === 0) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
       const sx1 = Math.sign(dx1), sy = Math.sign(dy), sx2 = Math.sign(dx2);
       return `M ${fx} ${fy} H ${midX - rc * sx1} Q ${midX} ${fy} ${midX} ${fy + rc * sy} V ${ty - rc * sy} Q ${midX} ${ty} ${midX + rc * sx2} ${ty} H ${tx}`;
     }
     const dy1 = midY - fy, dx = tx - fx, dy2 = ty - midY;
     const rc = Math.min(r, Math.abs(dy1) / 2, Math.abs(dx) / 2, Math.abs(dy2) / 2);
-    if (rc < 1) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
+    if (rc < 1 || dx === 0) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
     const sy1 = Math.sign(dy1), sx = Math.sign(dx), sy2 = Math.sign(dy2);
     return `M ${fx} ${fy} V ${midY - rc * sy1} Q ${fx} ${midY} ${fx + rc * sx} ${midY} H ${tx - rc * sx} Q ${tx} ${midY} ${tx} ${midY + rc * sy2} V ${ty}`;
   }
@@ -2485,29 +2487,32 @@ export default class ErdViewer {
   /** Convert waypoint array to SVG path with rounded corners. */
   _waypointsToSVGPath(points) {
     if (points.length < 2) return '';
-    if (points.length === 2) {
-      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    // Filter out NaN/undefined waypoints
+    const valid = points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+    if (valid.length < 2) return '';
+    if (valid.length === 2) {
+      return `M ${valid[0].x} ${valid[0].y} L ${valid[1].x} ${valid[1].y}`;
     }
 
-    const parts = [`M ${points[0].x} ${points[0].y}`];
+    const parts = [`M ${valid[0].x} ${valid[0].y}`];
 
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      const next = points[i + 1];
+    for (let i = 1; i < valid.length - 1; i++) {
+      const prev = valid[i - 1];
+      const curr = valid[i];
+      const next = valid[i + 1];
 
       // Direction from prev to curr
       const dx1 = curr.x - prev.x, dy1 = curr.y - prev.y;
       // Direction from curr to next
       const dx2 = next.x - curr.x, dy2 = next.y - curr.y;
 
+      // Zero-length segment — skip
+      if (dx1 === 0 && dy1 === 0) continue;
+
       // If collinear, skip corner (just continue the segment)
       if ((dx1 === 0 && dx2 === 0) || (dy1 === 0 && dy2 === 0)) {
-        // Extend to this point inline (the next segment handles continuation)
-        if (dx1 !== 0 || dy1 !== 0) {
-          if (dy1 === 0) parts.push(`H ${curr.x}`);
-          else parts.push(`V ${curr.y}`);
-        }
+        if (dy1 === 0) parts.push(`H ${curr.x}`);
+        else parts.push(`V ${curr.y}`);
         continue;
       }
 
@@ -2527,8 +2532,8 @@ export default class ErdViewer {
       const sdx2 = Math.sign(dx2) || 0, sdy2 = Math.sign(dy2) || 0;
 
       // Approach point (rc before the corner)
-      const ax = curr.x - sdx1 * rc * (dy1 === 0 ? 1 : 0) - sdy1 * 0;
-      const ay = curr.y - sdy1 * rc * (dx1 === 0 ? 1 : 0) - sdx1 * 0;
+      const ax = curr.x - sdx1 * rc * (dy1 === 0 ? 1 : 0);
+      const ay = curr.y - sdy1 * rc * (dx1 === 0 ? 1 : 0);
       // Departure point (rc after the corner)
       const dpx = curr.x + sdx2 * rc * (dy2 === 0 ? 1 : 0);
       const dpy = curr.y + sdy2 * rc * (dx2 === 0 ? 1 : 0);
@@ -2540,8 +2545,8 @@ export default class ErdViewer {
     }
 
     // Final segment to last point
-    const last = points[points.length - 1];
-    const penult = points[points.length - 2];
+    const last = valid[valid.length - 1];
+    const penult = valid[valid.length - 2];
     if (Math.abs(last.y - penult.y) < 1) parts.push(`H ${last.x}`);
     else parts.push(`V ${last.y}`);
 
@@ -2670,7 +2675,7 @@ export default class ErdViewer {
             parts.push(`A ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5]} ${nums[6]}`);
             cx = nums[5]; cy = nums[6];
           } else {
-            parts.push(tok);
+            // Skip unrecognized or garbled tokens (e.g. V with NaN)
           }
         }
       }

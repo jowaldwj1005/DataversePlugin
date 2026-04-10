@@ -2221,6 +2221,7 @@ class ApiExplorer {
       }
       .${CSS}-node.selected {
         background: var(--dvt-selected, #e1efff);
+        color: var(--dvt-text, #cccccc);
         border-bottom-color: var(--dvt-accent, #0078d4);
       }
       .${CSS}-node.focused {

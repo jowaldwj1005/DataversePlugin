@@ -42,6 +42,7 @@ const TAB_DEFINITIONS = Object.freeze([
   { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6', tip: 'Batch operations: create, update, delete, assign, export/import' },
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12', tip: 'Role privileges, user permissions, field-level security' },
   { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F', tip: 'Entity-relationship diagrams for any solution' },
+  { id: 'erdpro', label: 'ERD Pro', icon: '\uD83D\uDCD0', tip: 'Documentation-grade ERD with channel routing and print-ready export' },
   { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9', tip: 'Generate AI tool schemas (Claude/OpenAI/MCP) from entity metadata' },
   { id: 'aicustomizer', label: 'AI', icon: '\u2728', tip: 'Modify and create views via natural language (BYOK: OpenAI/Azure/Anthropic)' },
   { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB', tip: 'Inspect and interact with the current form context' },
@@ -582,6 +583,14 @@ class DataverseToolkit {
           break;
         }
 
+        case 'erdpro': {
+          const { default: ErdPro } = await import('./modules/erd-pro.js');
+          const module = new ErdPro(container, this.api, this.cache);
+          module.render();
+          this._modules[tabId] = module;
+          break;
+        }
+
         case 'toolbuilder': {
           const { default: ToolBuilder } = await import('./modules/tool-builder.js');
           const module = new ToolBuilder(container, this.api, this.cache);
@@ -900,6 +909,7 @@ class DataverseToolkit {
         '--dvt-warning': '#dcdcaa',
         '--dvt-error': '#f48771',
         '--dvt-code-bg': '#1e1e1e',
+        '--dvt-selected': '#094771',
       },
       light: {
         '--dvt-bg': '#ffffff',
@@ -918,6 +928,7 @@ class DataverseToolkit {
         '--dvt-warning': '#c19c00',
         '--dvt-error': '#e81123',
         '--dvt-code-bg': '#f5f5f5',
+        '--dvt-selected': '#d6ebff',
       },
       'high-contrast': {
         '--dvt-bg': '#000000',
@@ -936,6 +947,7 @@ class DataverseToolkit {
         '--dvt-warning': '#ffff00',
         '--dvt-error': '#ff0000',
         '--dvt-code-bg': '#0a0a0a',
+        '--dvt-selected': '#0c3668',
       },
     };
 
