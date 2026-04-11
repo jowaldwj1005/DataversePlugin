@@ -155,6 +155,22 @@ export default class ErdPro {
     this.#savePersistence();
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    if (ctx.solution) this.#loadSolution(ctx.solution);
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      solution: this.#state?.solutionName || null,
+      entityCount: this.#state?.entities?.length || 0,
+      selectedEntity: this.#state?.selectedEntity || null,
+    };
+  }
+
   // =========================================================================
   // Solution loading
   // =========================================================================

@@ -852,6 +852,29 @@ export class BulkOperations {
     return [...this.operations];
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    if (Array.isArray(ctx.operations)) {
+      for (const op of ctx.operations) {
+        this.addOperation(op);
+      }
+      this._renderOperationsList?.();
+    }
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      operations: this.getOperations().map(op => ({
+        method: op.method, url: op.url, body: op.body, description: op.description, status: op.status,
+      })),
+      count: this.operations.length,
+      executing: this._executing || false,
+    };
+  }
+
   /**
    * Execute all operations via $batch.
    */

@@ -2317,6 +2317,7 @@
 .rb-headers { display: flex; flex-direction: column; gap: 4px; }
 .rb-header-row { display: flex; align-items: center; gap: 6px; }
 .rb-common-headers { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--color-border-subtle); }
+.rb-common-headers.collapsed > :not(.rb-quick-add-toggle) { display: none; }
 .rb-prefer-options { display: flex; flex-wrap: wrap; gap: 4px; }
 
 .rb-body-toolbar { display: flex; gap: 6px; margin-bottom: 4px; }
@@ -3352,7 +3353,7 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 
 .erd-entity-name {
   fill: var(--color-text-bright);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   font-family: var(--font-mono, monospace);
   dominant-baseline: middle;
@@ -3360,7 +3361,7 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 
 .erd-entity-logical {
   fill: var(--color-text-muted);
-  font-size: 8px;
+  font-size: 9.5px;
   font-family: var(--font-mono, monospace);
   dominant-baseline: middle;
 }
@@ -3387,7 +3388,7 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 
 .erd-field {
   fill: var(--color-text-primary);
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, monospace);
   dominant-baseline: middle;
 }

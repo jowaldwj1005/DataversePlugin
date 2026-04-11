@@ -170,6 +170,8 @@ export function injectStyles() {
       font-size: 0.82rem;
       line-height: 1.5;
       max-width: 100%;
+      user-select: text;
+      cursor: text;
     }
     .${CSS}-chat-user .${CSS}-chat-bubble {
       background: var(--color-accent-primary);
@@ -194,6 +196,8 @@ export function injectStyles() {
       line-height: 1.6;
       color: var(--color-text-primary);
       margin-top: 6px;
+      user-select: text;
+      cursor: text;
     }
     .${CSS}-agent-content p { margin: 4px 0; }
     .${CSS}-agent-content ul { margin: 4px 0 4px 8px; padding-left: 12px; }
@@ -225,12 +229,73 @@ export function injectStyles() {
       overflow-y: auto;
     }
 
+    /* Slash command palette */
+    .${CSS}-palette {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      right: 0;
+      max-height: 240px;
+      overflow-y: auto;
+      background: var(--color-bg-panel);
+      border: 1px solid var(--color-border);
+      border-bottom: none;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      box-shadow: var(--shadow-lg);
+      z-index: 100;
+    }
+    .${CSS}-palette-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+    .${CSS}-palette-item:hover,
+    .${CSS}-palette-item.selected {
+      background: var(--color-bg-hover, rgba(255,255,255,0.06));
+    }
+    .${CSS}-palette-cmd {
+      font-family: var(--font-mono, 'Cascadia Code', 'Fira Code', monospace);
+      font-weight: 600;
+      color: var(--color-accent-primary);
+      min-width: 90px;
+      flex-shrink: 0;
+    }
+    .${CSS}-palette-desc {
+      color: var(--color-text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* System messages (slash command output) */
+    .${CSS}-system-msg {
+      padding: 8px 14px;
+      margin: 4px 12px;
+      background: var(--color-bg-sidebar, rgba(255,255,255,0.03));
+      border-left: 3px solid var(--color-accent-secondary, #888);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 0.82rem;
+      color: var(--color-text-secondary);
+    }
+    .${CSS}-system-msg p { margin: 4px 0; }
+    .${CSS}-system-msg strong { color: var(--color-text-primary); }
+    .${CSS}-system-msg code {
+      background: var(--color-bg-input);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 0.78rem;
+    }
+
     /* Input bar (fixed at bottom) */
     .${CSS}-input-bar {
       flex-shrink: 0;
       padding: 8px 12px;
       border-top: 1px solid var(--color-border);
       background: var(--color-bg-panel);
+      position: relative;
     }
     .${CSS}-prompt-input {
       width: 100%;
@@ -561,6 +626,8 @@ export function injectStyles() {
       padding: 6px 12px;
       border-bottom: 1px solid var(--color-border-subtle);
       background: var(--color-bg-panel);
+      user-select: none;
+      cursor: default;
     }
 
     /* System Prompt Editor Overlay */

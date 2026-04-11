@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   aiApiKey: '',
   aiModel: '',
   aiMaxTokens: 4096,
+  aiAzureApiMode: 'chat',  // 'chat' (Chat Completions) or 'responses' (Responses API)
 });
 
 const TAB_DEFINITIONS = Object.freeze([
@@ -352,6 +353,10 @@ class DataverseToolkit {
 
     root.appendChild(main);
 
+    // Quick chat bar (only if AI configured)
+    this._quickChatBar = this._buildQuickChatBar();
+    if (this._quickChatBar) root.appendChild(this._quickChatBar);
+
     // Status bar
     root.appendChild(this._buildStatusBar());
 
@@ -440,6 +445,99 @@ class DataverseToolkit {
     return bar;
   }
 
+  // -----------------------------------------------------------------------
+  // Quick Chat Bar — persistent AI input on every tab
+  // -----------------------------------------------------------------------
+
+  _buildQuickChatBar() {
+    if (!this._settings.aiProvider || !this._settings.aiApiKey) return null;
+
+    const bar = document.createElement('div');
+    bar.className = `${CSS_PREFIX}-quick-chat`;
+
+    const icon = document.createElement('span');
+    icon.className = `${CSS_PREFIX}-quick-chat-icon`;
+    icon.textContent = '\u2728'; // ✨
+    bar.appendChild(icon);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = `${CSS_PREFIX}-quick-chat-input`;
+    input.placeholder = 'Ask AI...';
+    input.setAttribute('aria-label', 'Ask AI');
+    this._quickChatInput = input;
+    bar.appendChild(input);
+
+    const hint = document.createElement('span');
+    hint.className = `${CSS_PREFIX}-quick-chat-hint`;
+    hint.textContent = 'Ctrl+I';
+    bar.appendChild(hint);
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = `${CSS_PREFIX}-quick-chat-send`;
+    sendBtn.textContent = '\u2192'; // →
+    sendBtn.title = 'Send to AI';
+    bar.appendChild(sendBtn);
+
+    // Focus expands, blur collapses (if empty)
+    input.addEventListener('focus', () => bar.classList.add('expanded'));
+    input.addEventListener('blur', () => {
+      if (!input.value.trim()) bar.classList.remove('expanded');
+    });
+
+    // Send on Enter
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && input.value.trim()) {
+        e.preventDefault();
+        this._sendQuickChat(input.value.trim());
+        input.value = '';
+        input.blur();
+        bar.classList.remove('expanded');
+      }
+      if (e.key === 'Escape') {
+        input.value = '';
+        input.blur();
+        bar.classList.remove('expanded');
+      }
+    });
+
+    sendBtn.addEventListener('click', () => {
+      if (input.value.trim()) {
+        this._sendQuickChat(input.value.trim());
+        input.value = '';
+        input.blur();
+        bar.classList.remove('expanded');
+      }
+    });
+
+    // Hide bar when AI tab is active (it has its own input)
+    this.events.on('tab-changed', (tabId) => {
+      bar.style.display = tabId === 'aicustomizer' ? 'none' : '';
+    });
+
+    return bar;
+  }
+
+  _sendQuickChat(message) {
+    // Switch to AI tab with the message as context
+    this.switchTab('aicustomizer', { quickChatMessage: message });
+  }
+
+  /** Update quick chat bar visibility based on settings. */
+  _updateQuickChatBar() {
+    const hasAi = this._settings.aiProvider && this._settings.aiApiKey;
+    if (hasAi && !this._quickChatBar) {
+      this._quickChatBar = this._buildQuickChatBar();
+      if (this._quickChatBar) {
+        // Insert before status bar
+        this._statusBar?.parentNode?.insertBefore(this._quickChatBar, this._statusBar);
+      }
+    } else if (!hasAi && this._quickChatBar) {
+      this._quickChatBar.remove();
+      this._quickChatBar = null;
+    }
+  }
+
   _buildWelcomeScreen() {
     const welcome = document.createElement('div');
     welcome.className = `${CSS_PREFIX}-welcome`;
@@ -473,8 +571,18 @@ class DataverseToolkit {
   // Tab switching and lazy module initialization
   // -----------------------------------------------------------------------
 
-  _switchTab(tabId) {
+  /**
+   * Switch to a tab, optionally passing context for the module.
+   * @param {string} tabId
+   * @param {Object|null} context — passed to module.setContext() after render
+   */
+  switchTab(tabId, context = null) {
     if (!TAB_DEFINITIONS.find((t) => t.id === tabId)) return;
+
+    // Notify current module it's being hidden (pause timers etc.)
+    if (this._activeTab && this._modules[this._activeTab]?.onHide) {
+      try { this._modules[this._activeTab].onHide(); } catch { /* ignore */ }
+    }
 
     this._activeTab = tabId;
 
@@ -483,10 +591,6 @@ class DataverseToolkit {
       btn.classList.toggle('active', btn.dataset.tab === tabId);
     });
 
-    // Notify current module it's being hidden (pause timers etc.)
-    if (this._activeTab && this._modules[this._activeTab]?.onHide) {
-      try { this._modules[this._activeTab].onHide(); } catch { /* ignore */ }
-    }
     // Clear content
     if (this._tabContent) {
       this._tabContent.innerHTML = '';
@@ -501,13 +605,28 @@ class DataverseToolkit {
     // For other tabs, require connection
     if (!this._connected) return;
 
-    // Lazy-initialize module
-    this._initModule(tabId);
+    // Lazy-initialize module, then apply context
+    this._initModule(tabId, context);
 
     this.events.emit('tab-changed', tabId);
   }
 
-  async _initModule(tabId) {
+  /** Alias for internal callers. */
+  _switchTab(tabId, context = null) {
+    this.switchTab(tabId, context);
+  }
+
+  /** Get a cached module instance (or null if not yet loaded). */
+  getModule(tabId) {
+    return this._modules[tabId] || null;
+  }
+
+  /** Get the currently active tab ID. */
+  getActiveTab() {
+    return this._activeTab;
+  }
+
+  async _initModule(tabId, context = null) {
     if (!this._tabContent) return;
 
     // Reuse existing module if already loaded
@@ -519,6 +638,9 @@ class DataverseToolkit {
       try {
         this._modules[tabId].container = container;
         this._modules[tabId].render();
+        if (context && typeof this._modules[tabId].setContext === 'function') {
+          this._modules[tabId].setContext(context);
+        }
       } catch (err) {
         this._showError(container, `Failed to render module: ${err.message}`);
       }
@@ -618,6 +740,11 @@ class DataverseToolkit {
         default:
           container.textContent = 'Unknown module.';
       }
+
+      // Apply context to freshly-loaded module
+      if (context && this._modules[tabId] && typeof this._modules[tabId].setContext === 'function') {
+        this._modules[tabId].setContext(context);
+      }
     } catch (err) {
       console.error(`[Dataverse Toolkit] Failed to load module "${tabId}":`, err);
       this._showError(container, `Failed to load module: ${err.message}`);
@@ -707,6 +834,17 @@ class DataverseToolkit {
                placeholder="gpt-4o / claude-sonnet-4-5-20250514 / ..." />
       </div>
 
+      <div class="${CSS_PREFIX}-settings-group" id="ai-azure-mode-group" style="display:${this._settings.aiProvider === 'azure' ? 'block' : 'none'};">
+        <label class="${CSS_PREFIX}-settings-label">Azure API Mode</label>
+        <select id="setting-ai-azure-mode" class="${CSS_PREFIX}-settings-select">
+          <option value="chat"${this._settings.aiAzureApiMode !== 'responses' ? ' selected' : ''}>Chat Completions</option>
+          <option value="responses"${this._settings.aiAzureApiMode === 'responses' ? ' selected' : ''}>Responses API</option>
+        </select>
+        <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;">
+          Chat Completions: /chat/completions · Responses API: /responses (newer, supports web search grounding)
+        </small>
+      </div>
+
       <div class="${CSS_PREFIX}-settings-group" id="ai-endpoint-preview-group" style="display:none;">
         <label class="${CSS_PREFIX}-settings-label">Resulting API Endpoint</label>
         <code id="ai-endpoint-preview" style="display:block;padding:6px 8px;background:var(--color-bg-input);border:1px solid var(--color-border-subtle);border-radius:var(--radius-sm);font-size:0.72rem;color:var(--color-accent-secondary);word-break:break-all;"></code>
@@ -761,8 +899,11 @@ class DataverseToolkit {
     const _updateAiPreview = () => {
       const provider = container.querySelector('#setting-ai-provider')?.value || '';
       const endpoint = (container.querySelector('#setting-ai-endpoint')?.value || '').replace(/\/+$/, '');
+      const azureMode = container.querySelector('#setting-ai-azure-mode')?.value || 'chat';
       const previewGroup = container.querySelector('#ai-endpoint-preview-group');
       const previewCode = container.querySelector('#ai-endpoint-preview');
+      const azureModeGroup = container.querySelector('#ai-azure-mode-group');
+      if (azureModeGroup) azureModeGroup.style.display = provider === 'azure' ? '' : 'none';
       if (!previewGroup || !previewCode) return;
 
       if (!provider || !endpoint) {
@@ -777,7 +918,9 @@ class DataverseToolkit {
           url = `${endpoint}/chat/completions`;
           break;
         case 'azure':
-          url = `${endpoint}/chat/completions?api-version=2024-06-01`;
+          url = azureMode === 'responses'
+            ? `${endpoint}/responses?api-version=2025-03-01-preview`
+            : `${endpoint}/chat/completions?api-version=2024-06-01`;
           break;
         case 'anthropic':
           url = `${endpoint}/messages`;
@@ -808,6 +951,7 @@ class DataverseToolkit {
 
     container.querySelector('#setting-ai-provider')?.addEventListener('change', _updateAiPreview);
     container.querySelector('#setting-ai-endpoint')?.addEventListener('input', _updateAiPreview);
+    container.querySelector('#setting-ai-azure-mode')?.addEventListener('change', _updateAiPreview);
     _updateAiPreview(); // initial render
 
     container.querySelector('#setting-save')?.addEventListener('click', () => {
@@ -824,6 +968,7 @@ class DataverseToolkit {
       this._settings.aiEndpoint = container.querySelector('#setting-ai-endpoint')?.value?.replace(/\/+$/, '') || '';
       this._settings.aiApiKey = container.querySelector('#setting-ai-key')?.value || '';
       this._settings.aiModel = container.querySelector('#setting-ai-model')?.value || '';
+      this._settings.aiAzureApiMode = container.querySelector('#setting-ai-azure-mode')?.value || 'chat';
 
       this.cache.setTTL(this._settings.cacheTTL);
       this._saveSettings();
@@ -985,6 +1130,7 @@ class DataverseToolkit {
   async _saveSettings() {
     try {
       await chrome.storage.local.set({ [STORAGE_KEY_SETTINGS]: this._settings });
+      this._updateQuickChatBar();
     } catch {
       // Ignore storage errors
     }
@@ -1018,6 +1164,15 @@ class DataverseToolkit {
         e.preventDefault();
         this.events.emit('focus-search');
         return;
+      }
+
+      // Ctrl+I: Focus quick chat bar
+      if (e.ctrlKey && !e.shiftKey && e.key === 'i') {
+        if (this._quickChatInput) {
+          e.preventDefault();
+          this._quickChatInput.focus();
+          return;
+        }
       }
 
       // Escape: Close modals/panels
@@ -1349,6 +1504,72 @@ class DataverseToolkit {
       }
 
       /* Status bar */
+      /* Quick Chat Bar */
+      .${CSS_PREFIX}-quick-chat {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: var(--dvt-bg-secondary, #252526);
+        border-top: 1px solid var(--dvt-border, #333);
+        flex-shrink: 0;
+        height: 32px;
+        transition: height 0.15s ease;
+        cursor: text;
+      }
+      .${CSS_PREFIX}-quick-chat.expanded {
+        height: 42px;
+      }
+      .${CSS_PREFIX}-quick-chat-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+        line-height: 1;
+      }
+      .${CSS_PREFIX}-quick-chat-input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--dvt-text, #ccc);
+        font-size: 12px;
+        font-family: inherit;
+        min-width: 0;
+      }
+      .${CSS_PREFIX}-quick-chat-input::placeholder {
+        color: var(--dvt-muted, #666);
+      }
+      .${CSS_PREFIX}-quick-chat-input:focus::placeholder {
+        color: var(--dvt-muted, #888);
+      }
+      .${CSS_PREFIX}-quick-chat-hint {
+        font-size: 10px;
+        color: var(--dvt-muted, #555);
+        flex-shrink: 0;
+        padding: 1px 5px;
+        border: 1px solid var(--dvt-border, #333);
+        border-radius: 3px;
+      }
+      .${CSS_PREFIX}-quick-chat.expanded .${CSS_PREFIX}-quick-chat-hint {
+        display: none;
+      }
+      .${CSS_PREFIX}-quick-chat-send {
+        background: none;
+        border: none;
+        color: var(--dvt-accent, #007acc);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 2px 4px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        display: none;
+      }
+      .${CSS_PREFIX}-quick-chat.expanded .${CSS_PREFIX}-quick-chat-send {
+        display: block;
+      }
+      .${CSS_PREFIX}-quick-chat-send:hover {
+        background: var(--dvt-hover, rgba(255,255,255,0.05));
+      }
+
       .${CSS_PREFIX}-status-bar {
         display: flex;
         align-items: center;

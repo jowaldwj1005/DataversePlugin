@@ -448,6 +448,18 @@ export class RequestBuilder {
     };
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    this.loadRequest(ctx);
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return this.getRequest();
+  }
+
   // -------------------------------------------------------------------------
   // UI Construction
   // -------------------------------------------------------------------------
@@ -711,12 +723,17 @@ export class RequestBuilder {
     section.content.appendChild(this._headersContainer);
     this._buildHeaderRows();
 
-    // Quick-add common headers
+    // Quick-add common headers (collapsed by default)
     const commonDiv = document.createElement('div');
-    commonDiv.className = 'rb-common-headers';
+    commonDiv.className = 'rb-common-headers collapsed';
     const commonLabel = document.createElement('div');
-    commonLabel.className = 'rb-option-label';
-    commonLabel.textContent = 'Quick Add:';
+    commonLabel.className = 'rb-option-label rb-quick-add-toggle';
+    commonLabel.textContent = '▸ Quick Add';
+    commonLabel.style.cursor = 'pointer';
+    commonLabel.addEventListener('click', () => {
+      const isCollapsed = commonDiv.classList.toggle('collapsed');
+      commonLabel.textContent = isCollapsed ? '▸ Quick Add' : '▾ Quick Add';
+    });
     commonDiv.appendChild(commonLabel);
 
     // Prefer shortcuts

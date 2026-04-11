@@ -15,6 +15,8 @@ import { ToolRegistry, registerBuiltinTools } from './ai-customizer/tool-registr
 import { ToolExecutor } from './ai-customizer/tool-executor.js';
 import { SkillManager } from './ai-customizer/skill-manager.js';
 import { SessionManager } from './ai-customizer/session-manager.js';
+import { ModuleBridge } from './ai-customizer/module-bridge.js';
+import app from '../app.js';
 
 const CSS = 'ac';
 const STORAGE_KEY = 'dvt-settings';
@@ -38,6 +40,7 @@ export default class AiCustomizer {
   #runner = null;
   #toolRegistry = null;
   #toolExecutor = null;
+  #bridge = null;
   #skillManager = null;
   #sessionManager = null;
   #debugLog = [];
@@ -54,6 +57,10 @@ export default class AiCustomizer {
   #tokenEstimate = null;
   #sendBtn = null;
   #logContainer = null;
+  #paletteEl = null;
+  #paletteVisible = false;
+  #paletteSelection = 0;
+  #paletteItems = [];
 
   constructor(container, apiClient, metadataCache) {
     this.container = container;
@@ -95,6 +102,10 @@ export default class AiCustomizer {
       onLog: (tag, summary, detail) => this._log(tag, summary, detail),
     });
 
+    // Initialize module bridge (connects agent to all extension modules)
+    this.#bridge = new ModuleBridge(app);
+    this.#toolExecutor.setBridge(this.#bridge);
+
     // Initialize skill + session managers
     this.#skillManager = new SkillManager();
     await this.#skillManager.load();
@@ -135,6 +146,18 @@ export default class AiCustomizer {
   }
 
   onHide() {}
+
+  /**
+   * Receive context from the quick chat bar or module bridge.
+   * If quickChatMessage is provided, auto-send it.
+   */
+  setContext(ctx) {
+    if (ctx?.quickChatMessage && this.#promptTextarea) {
+      this.#promptTextarea.value = ctx.quickChatMessage;
+      // Auto-send after a brief tick (let the DOM settle after tab switch)
+      requestAnimationFrame(() => this._onSend());
+    }
+  }
 
   // =========================================================================
   // Toolbar
@@ -396,15 +419,31 @@ export default class AiCustomizer {
     const bar = document.createElement('div');
     bar.className = `${CSS}-input-bar`;
 
+    // Slash command palette (hidden by default)
+    this.#paletteEl = this._buildPalette();
+    bar.appendChild(this.#paletteEl);
+
     this.#promptTextarea = document.createElement('textarea');
     this.#promptTextarea.className = `${CSS}-prompt-input`;
-    this.#promptTextarea.placeholder = 'Enter to send, Shift+Enter for new line';
+    this.#promptTextarea.placeholder = 'Enter to send, Shift+Enter for new line, / for commands';
     this.#promptTextarea.rows = 2;
-    this.#promptTextarea.addEventListener('input', () => this._updateTokenEstimate());
+    this.#promptTextarea.addEventListener('input', () => {
+      this._updateTokenEstimate();
+      this._updatePalette();
+    });
     this.#promptTextarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        this._onSend();
+      // Palette navigation
+      if (this.#paletteVisible) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); this._paletteMoveSelection(1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); this._paletteMoveSelection(-1); return; }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this._paletteSelectCurrent(); return; }
+        if (e.key === 'Escape') { e.preventDefault(); this._hidePalette(); return; }
+        if (e.key === 'Tab') { e.preventDefault(); this._paletteSelectCurrent(); return; }
+      } else {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this._onSend();
+        }
       }
     });
 
@@ -416,6 +455,17 @@ export default class AiCustomizer {
     this.#sendBtn.textContent = 'Send';
     this.#sendBtn.addEventListener('click', () => this._onSend());
 
+    // Commands button (visual access to palette)
+    const cmdBtn = document.createElement('button');
+    cmdBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+    cmdBtn.textContent = '/ Commands';
+    cmdBtn.title = 'Show slash commands';
+    cmdBtn.addEventListener('click', () => {
+      this.#promptTextarea.value = '/';
+      this.#promptTextarea.focus();
+      this._updatePalette();
+    });
+
     const sysPromptBtn = document.createElement('button');
     sysPromptBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
     sysPromptBtn.textContent = 'System Prompt';
@@ -424,7 +474,7 @@ export default class AiCustomizer {
     this.#tokenEstimate = document.createElement('span');
     this.#tokenEstimate.className = `${CSS}-token-estimate`;
 
-    controls.append(this.#sendBtn, sysPromptBtn, this.#tokenEstimate);
+    controls.append(this.#sendBtn, cmdBtn, sysPromptBtn, this.#tokenEstimate);
     bar.append(this.#promptTextarea, controls);
     this.container.appendChild(bar);
   }
@@ -432,6 +482,249 @@ export default class AiCustomizer {
   _updateTokenEstimate() {
     const text = this.#promptTextarea?.value || '';
     this.#tokenEstimate.textContent = text.trim() ? `~${estimateTokens(text)} tokens` : '';
+  }
+
+  // =========================================================================
+  // Slash Commands
+  // =========================================================================
+
+  /** All available slash commands. */
+  get _slashCommands() {
+    return [
+      { id: 'tools', label: '/tools', description: 'List all available tools', handler: () => this._cmdTools() },
+      { id: 'skills', label: '/skills', description: 'Open skill manager', handler: () => this._cmdSkills() },
+      { id: 'save-tool', label: '/save-tool', description: 'Save exploration as reusable tool', handler: () => this._cmdSaveTool() },
+      { id: 'entity', label: '/entity', description: 'Set active entity context', hasArg: true, handler: (arg) => this._cmdEntity(arg) },
+      { id: 'view', label: '/view', description: 'Set active view context', hasArg: true, handler: (arg) => this._cmdView(arg) },
+      { id: 'sessions', label: '/sessions', description: 'List and switch sessions', handler: () => this._cmdSessions() },
+      { id: 'export', label: '/export', description: 'Export current session', handler: () => this._cmdExport() },
+      { id: 'clear', label: '/clear', description: 'Clear current session', handler: () => this._cmdClear() },
+      { id: 'debug', label: '/debug', description: 'Toggle debug console', handler: () => this._cmdDebug() },
+      { id: 'prompt', label: '/prompt', description: 'Open system prompt editor', handler: () => this._showSystemPromptEditor() },
+      { id: 'help', label: '/help', description: 'Show available commands', handler: () => this._cmdHelp() },
+    ];
+  }
+
+  /** Build the palette DOM element. */
+  _buildPalette() {
+    const el = document.createElement('div');
+    el.className = `${CSS}-palette`;
+    el.style.display = 'none';
+    return el;
+  }
+
+  /** Show/hide the palette based on current input. */
+  _updatePalette() {
+    const text = this.#promptTextarea?.value || '';
+    if (!text.startsWith('/')) {
+      this._hidePalette();
+      return;
+    }
+
+    const query = text.slice(1).toLowerCase();
+    const matches = this._slashCommands.filter(cmd =>
+      cmd.id.startsWith(query) || cmd.label.includes(query) || cmd.description.toLowerCase().includes(query)
+    );
+
+    if (!matches.length) {
+      this._hidePalette();
+      return;
+    }
+
+    this.#paletteItems = matches;
+    this.#paletteSelection = 0;
+    this.#paletteEl.innerHTML = '';
+
+    for (let i = 0; i < matches.length; i++) {
+      const cmd = matches[i];
+      const row = document.createElement('div');
+      row.className = `${CSS}-palette-item${i === 0 ? ' selected' : ''}`;
+      row.innerHTML = `<span class="${CSS}-palette-cmd">${cmd.label}</span><span class="${CSS}-palette-desc">${cmd.description}</span>`;
+      row.addEventListener('click', () => { this.#paletteSelection = i; this._paletteSelectCurrent(); });
+      row.addEventListener('mouseenter', () => {
+        this.#paletteSelection = i;
+        this.#paletteEl.querySelectorAll(`.${CSS}-palette-item`).forEach((el, j) => el.classList.toggle('selected', j === i));
+      });
+      this.#paletteEl.appendChild(row);
+    }
+
+    this.#paletteEl.style.display = '';
+    this.#paletteVisible = true;
+  }
+
+  _hidePalette() {
+    if (!this.#paletteVisible) return;
+    this.#paletteEl.style.display = 'none';
+    this.#paletteVisible = false;
+    this.#paletteItems = [];
+  }
+
+  _paletteMoveSelection(delta) {
+    const items = this.#paletteEl.querySelectorAll(`.${CSS}-palette-item`);
+    if (!items.length) return;
+    this.#paletteSelection = (this.#paletteSelection + delta + items.length) % items.length;
+    items.forEach((el, i) => el.classList.toggle('selected', i === this.#paletteSelection));
+    items[this.#paletteSelection]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  _paletteSelectCurrent() {
+    const cmd = this.#paletteItems[this.#paletteSelection];
+    if (!cmd) return;
+
+    this._hidePalette();
+
+    if (cmd.hasArg) {
+      // Insert command prefix and let user type the argument
+      this.#promptTextarea.value = cmd.label + ' ';
+      this.#promptTextarea.focus();
+      return;
+    }
+
+    this.#promptTextarea.value = '';
+    cmd.handler();
+  }
+
+  /**
+   * Try to handle input as a slash command.
+   * @returns {boolean} true if handled, false if should proceed to agent.
+   */
+  _trySlashCommand(text) {
+    if (!text.startsWith('/')) return false;
+
+    const parts = text.slice(1).split(/\s+/);
+    const cmdId = parts[0].toLowerCase();
+    const arg = parts.slice(1).join(' ');
+
+    const cmd = this._slashCommands.find(c => c.id === cmdId);
+    if (!cmd) return false;
+
+    cmd.handler(arg);
+    return true;
+  }
+
+  // -- Slash command handlers --
+
+  _cmdTools() {
+    const tools = this.#toolRegistry.getAll();
+    const grouped = {};
+    for (const t of tools) {
+      (grouped[t.category] ??= []).push(t);
+    }
+    let md = '**Available Tools:**\n\n';
+    for (const [cat, list] of Object.entries(grouped)) {
+      md += `**${cat}**\n`;
+      for (const t of list) {
+        const confirm = t.requiresConfirmation ? ' *(confirmation)*' : '';
+        md += `- \`${t.id}\` — ${t.description}${confirm}\n`;
+      }
+      md += '\n';
+    }
+    this._addSystemMessage(md);
+  }
+
+  _cmdSkills() {
+    // TODO: Phase 5 — open skill drawer
+    const skills = this.#skillManager.getAll();
+    if (!skills.length) {
+      this._addSystemMessage('No skills configured yet. Skills will be available in a future update.');
+      return;
+    }
+    let md = '**Skills:**\n\n';
+    for (const s of skills) {
+      md += `- **${s.name}** — linked to: ${s.linkedTools?.join(', ') || '(none)'}\n`;
+    }
+    this._addSystemMessage(md);
+  }
+
+  _cmdSaveTool() {
+    // TODO: Phase 5 — tool crystallization
+    this._addSystemMessage('Tool crystallization will be available in a future update. For now, describe what you want to save and the agent can help structure it.');
+  }
+
+  _cmdEntity(arg) {
+    if (!arg) {
+      this._addSystemMessage(`Current entity: **${this.#selectedEntity?.LogicalName || '(none)'}**\n\nUsage: \`/entity account\``);
+      return;
+    }
+    // Find matching entity
+    const match = this.#entitiesSorted.find(e =>
+      e.LogicalName.toLowerCase() === arg.toLowerCase() ||
+      (e.DisplayName?.UserLocalizedLabel?.Label || '').toLowerCase() === arg.toLowerCase()
+    );
+    if (!match) {
+      this._addSystemMessage(`Entity "${arg}" not found. Try \`/entity\` to see current, or type part of the name.`);
+      return;
+    }
+    // Set entity via the entity select dropdown
+    if (this.#entitySelect) {
+      this.#entitySelect.value = match.LogicalName;
+      this.#entitySelect.dispatchEvent(new Event('change'));
+    }
+    this._addSystemMessage(`Entity set to **${match.LogicalName}** (${match.DisplayName?.UserLocalizedLabel?.Label || ''})`);
+  }
+
+  _cmdView(arg) {
+    if (!arg) {
+      this._addSystemMessage('Usage: `/view "Active Accounts"` — set the active view by name.');
+      return;
+    }
+    this._addSystemMessage(`View selection via slash command is not yet implemented. Select a view from the dropdown above.`);
+  }
+
+  _cmdSessions() {
+    const sessions = this.#sessionManager.getAll();
+    const active = this.#sessionManager.activeId;
+    let md = '**Sessions:**\n\n';
+    for (const s of sessions) {
+      const marker = s.id === active ? ' *(active)*' : '';
+      const count = s.messages?.length || 0;
+      md += `- **${s.name || 'Untitled'}**${marker} — ${count} messages\n`;
+    }
+    md += '\nSwitch sessions using the dropdown in the toolbar.';
+    this._addSystemMessage(md);
+  }
+
+  _cmdExport() {
+    const md = this.#sessionManager.exportAsMarkdown();
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `session-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this._addSystemMessage('Session exported as Markdown.');
+  }
+
+  _cmdClear() {
+    if (this.#chatArea) this.#chatArea.innerHTML = '';
+    this.#sessionManager.clearActive?.();
+    this._addSystemMessage('Chat cleared.');
+  }
+
+  _cmdDebug() {
+    this.#consoleExpanded = !this.#consoleExpanded;
+    const console = this.container.querySelector(`.${CSS}-console`);
+    if (console) console.classList.toggle('collapsed', !this.#consoleExpanded);
+    this._addSystemMessage(`Debug console ${this.#consoleExpanded ? 'expanded' : 'collapsed'}.`);
+  }
+
+  _cmdHelp() {
+    let md = '**Slash Commands:**\n\n';
+    for (const cmd of this._slashCommands) {
+      md += `- \`${cmd.label}\` — ${cmd.description}\n`;
+    }
+    md += '\nType `/` in the input to see the command palette.';
+    this._addSystemMessage(md);
+  }
+
+  /** Add a system-generated message to the chat (not from agent, not from user). */
+  _addSystemMessage(markdownText) {
+    const wrapper = document.createElement('div');
+    wrapper.className = `${CSS}-system-msg`;
+    wrapper.innerHTML = this._renderMarkdown(markdownText);
+    this.#chatArea?.appendChild(wrapper);
+    this._scrollChat();
   }
 
   // =========================================================================
@@ -515,9 +808,18 @@ export default class AiCustomizer {
 
     if (this.#runner) { this.#runner.abort(); this.#runner = null; this.#sendBtn.textContent = 'Send'; return; }
 
+    // Try slash command first
+    if (this._trySlashCommand(userPrompt)) {
+      this.#promptTextarea.value = '';
+      this._updateTokenEstimate();
+      this._hidePalette();
+      return;
+    }
+
     // Clear input
     this.#promptTextarea.value = '';
     this._updateTokenEstimate();
+    this._hidePalette();
     this.#sendBtn.textContent = 'Cancel';
 
     // Add user message to chat + session
@@ -566,6 +868,12 @@ export default class AiCustomizer {
       const toolIds = this.#toolRegistry.getAll().map(t => t.id);
       const skillSection = this.#skillManager.buildSkillPromptSection(toolIds);
       if (skillSection) contextParts.push(skillSection);
+
+      // Inject active module context (what the user is currently looking at)
+      if (this.#bridge) {
+        const moduleCtx = this.#bridge.buildContextForPrompt();
+        if (moduleCtx) contextParts.push('', moduleCtx);
+      }
 
       systemPrompt = contextParts.join('\n');
     }

@@ -72,6 +72,29 @@ export default class ToolBuilder {
     this._outputPre = null;
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  async setContext(ctx) {
+    if (ctx.format) this._toolFormat = ctx.format;
+    if (ctx.mode) this._crudMode = ctx.mode;
+    if (ctx.entity) {
+      // Find entity in list and select it
+      const ent = this._entities.find(e => e.LogicalName === ctx.entity);
+      if (ent && this._selectEntity) this._selectEntity(ent);
+    }
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      entity: this._model?.entity || null,
+      format: this._toolFormat,
+      mode: this._crudMode,
+      outputMode: this._outputMode,
+    };
+  }
+
   async render() {
     this.container.innerHTML = '';
     this.container.classList.add(`${CSS}-container`);

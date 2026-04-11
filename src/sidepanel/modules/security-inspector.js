@@ -119,6 +119,26 @@ export class SecurityInspector {
     }
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    if (ctx.tab) this._activeTab = ctx.tab;
+    if (ctx.entity) {
+      this._selectedEntity = ctx.entity;
+      this._buildUI();
+      this._loadEntityPrivileges(ctx.entity);
+    }
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      activeTab: this._activeTab,
+      entity: this._selectedEntity || null,
+    };
+  }
+
   // -----------------------------------------------------------------------
   // UI Construction
   // -----------------------------------------------------------------------

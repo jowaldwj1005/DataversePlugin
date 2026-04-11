@@ -38,11 +38,26 @@ export class MyModule {
   render()   { ... }   // called each time tab becomes active; builds DOM from scratch
   destroy()  { ... }   // optional cleanup (timers, global listeners)
   onHide()   { ... }   // optional; called on tab switch without destroying module
+
+  // Module Bridge integration (optional — enables AI agent orchestration)
+  setContext(ctx) { ... }  // receive context from agent or tab switch
+  getContext()    { ... }  // expose current state to agent
 }
 ```
 
 `apiClient` is `DataverseClient` from `src/shared/api-client.js`.
 `metadataCache` is the `MetadataCache` instance from `app.js` — **not** from `src/shared/metadata-cache.js` (that file exists but is unused in the side panel).
+
+### Tab switching with context
+
+```js
+app.switchTab(tabId, context);         // public — switches tab, passes context
+app.getModule(tabId);                  // returns cached module instance or null
+app.getActiveTab();                    // returns current tab ID
+```
+
+When `context` is provided, `module.setContext(ctx)` is called after render.
+Modules are cached singletons — switching away and back preserves state.
 
 ---
 
@@ -97,6 +112,60 @@ All results are TTL-cached (default 1 hour). Cache is keyed per method+args.
 
 ---
 
+## Module Bridge (AI Agent ↔ Modules)
+
+The Module Bridge (`ai-customizer/module-bridge.js`) connects the AI agent to every module:
+
+```
+AI Agent (chat)
+  ├─ read_module_state(tabId)      → module.getContext() — no tab switch
+  └─ navigate_module(tabId, ctx)   → app.switchTab() → module.setContext(ctx)
+```
+
+**Principle: "Invisible for data, visible for artifacts."**
+
+- Data queries (metadata, records, FetchXML execution) → results in chat, no tab switch
+- Visual artifacts (ERD, query builder, bulk ops) → agent navigates to the tab
+
+### Agent tools (tool-registry.js)
+
+28 built-in tools in categories:
+- **metadata**: `get_entities`, `get_entity_metadata`, `get_optionset`, `inspect_form`
+- **query**: `execute_fetchxml`, `execute_odata`, `get_record`
+- **crud**: `create_record`, `update_record`, `delete_record` (confirmation required)
+- **customization**: `publish_entity`, `execute_action` (confirmation required)
+- **code**: `execute_code` (confirmation required, never auto-approvable)
+- **navigation**: `navigate_module`, `read_module_state`, `load_fetchxml`, `load_request`, `load_bulk_operations`, `show_erd`, `show_security`, `generate_tool_schema`
+- **other**: `name_conversation`
+
+Tool handlers receive `(params, ctx)` where `ctx = { api, cache, log, bridge }`.
+
+### Quick Chat Bar
+
+Persistent 32px input bar at bottom of every tab (when AI configured).
+`Ctrl+I` focuses it. Enter sends message → switches to AI tab → auto-sends.
+Hidden when AI tab is active. Appears/disappears when AI settings change.
+
+### Agent protocol (JSON-based, not native function calling)
+
+```jsonc
+{ "status": "tool_call", "tool": "<id>", "params": {...}, "reasoning": "..." }
+{ "status": "tool_calls", "calls": [...], "reasoning": "..." }
+{ "status": "done", "reasoning": "..." }      // reasoning IS the user-facing answer
+{ "status": "question", "question": "...", "reasoning": "..." }
+{ "status": "error", "error": "...", "reasoning": "..." }
+```
+
+### Context injection
+
+The system prompt automatically includes:
+1. Tool list with descriptions and param schemas
+2. Skill documents linked to active tools
+3. Current entity/view context (if selected)
+4. Active module state via `bridge.buildContextForPrompt()` (what tab the user is on, current query/request/etc.)
+
+---
+
 ## Coding conventions
 
 - ES2022+, pure JS — no TypeScript, no JSX, no bundler
@@ -130,7 +199,7 @@ All results are TTL-cached (default 1 hour). Cache is keyed per method+args.
 | **Security** | Role matrix uses `RetrieveRolePrivilegesRole`. User permissions use `RetrieveUserPrivileges`. Field security uses direct nav prop on systemuser. |
 | **ERD** | Solution → solutioncomponents → entities. Export Schema = JSON Schema draft-07. |
 | **Tools** | Agent Tool Builder. Entity cards → JSON Schema tool definitions (Claude/OpenAI). 1:N children as deep insert array properties. Output: Tool Schema, Deep Insert template, API info. |
-| **AI** | AI Customizer (BYOK: OpenAI/Azure/Anthropic). Chat-based conversational UI. Multi-turn agent loop with metadata tool calls. Modify + create saved queries (views) via natural language. Stateful context — follow-up prompts build on previous applies. Debug console with full request/response logging. |
+| **AI** | Dataverse Agent (BYOK: OpenAI/Azure/Anthropic). "Claude Code for Dataverse". 28 built-in tools, multi-turn agent loop, sessions, skills, view operations, confirmation UI. Can navigate to and orchestrate ALL other modules via Module Bridge. Quick Chat Bar on every tab (`Ctrl+I`). |
 | **Settings** | Persisted to `chrome.storage.local`. Theme applies immediately; no page reload needed. AI provider settings (endpoint, API key, model) stored locally. |
 
 ---

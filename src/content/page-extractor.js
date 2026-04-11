@@ -164,7 +164,18 @@ async function executeFormInspect(action, params, requestId) {
 
 function requireFormContext() {
   if (typeof Xrm === 'undefined') throw new Error('Xrm is not available. Navigate to a Dynamics 365 form.');
-  if (!Xrm.Page?.data?.entity) throw new Error('No form is currently open.');
+  if (!Xrm.Page?.data?.entity) {
+    // Diagnostic: what exactly is missing in the chain?
+    const diag = {
+      hasXrm: typeof Xrm !== 'undefined',
+      hasPage: !!Xrm.Page,
+      hasData: !!Xrm.Page?.data,
+      hasEntity: !!Xrm.Page?.data?.entity,
+      pageKeys: Xrm.Page ? Object.keys(Xrm.Page).slice(0, 10) : [],
+      dataKeys: Xrm.Page?.data ? Object.keys(Xrm.Page.data).slice(0, 10) : [],
+    };
+    throw new Error(`No form is currently open. Diag: ${JSON.stringify(diag)}`);
+  }
 }
 
 async function handleFormAction(action, params) {

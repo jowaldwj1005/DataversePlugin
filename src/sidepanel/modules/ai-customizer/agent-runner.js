@@ -6,7 +6,7 @@
  * and produce final results.
  */
 
-import { buildAiRequest, extractAiResponse, estimateTokens } from './provider-adapters.js';
+import { buildAiRequest, extractAiResponse, estimateTokens, isAzureResponses } from './provider-adapters.js';
 
 let stepCounter = 0;
 
@@ -24,6 +24,7 @@ export class AgentRunner {
   // Conversation state
   #systemPrompt = '';
   #messages = [];
+  #responseId = null;  // Azure Responses API: tracks previous_response_id for multi-turn
   #resolveQuestion = null;
   #resolveConfirmation = null;
 
@@ -59,6 +60,7 @@ export class AgentRunner {
     this.#aborted = false;
     this.#systemPrompt = systemPrompt;
     this.#messages = [{ role: 'user', content: userPrompt }];
+    this.#responseId = null;  // Reset for new conversation
 
     const sysTokens = estimateTokens(systemPrompt);
     const userTokens = estimateTokens(userPrompt);
@@ -252,16 +254,23 @@ export class AgentRunner {
   // ---------------------------------------------------------------------------
 
   async #callAi() {
+    const useResponses = isAzureResponses(this.#settings);
+
     const { url, headers, body } = buildAiRequest(
-      this.#settings.aiProvider, this.#systemPrompt, this.#messages, this.#settings
+      this.#settings.aiProvider, this.#systemPrompt, this.#messages, this.#settings,
+      { previousResponseId: this.#responseId }
     );
 
-    const allMessages = body.messages || [];
-    const msgSummary = allMessages.map(m => {
-      const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `[${m.role}] ${c.length > 200 ? c.slice(0, 200) + '\u2026' : c}`;
+    // Log request summary
+    const inputItems = body.messages || body.input || [];
+    const itemsArray = Array.isArray(inputItems) ? inputItems : [{ content: inputItems }];
+    const msgSummary = itemsArray.map(m => {
+      const c = typeof m.content === 'string' ? m.content : (typeof m === 'string' ? m : JSON.stringify(m));
+      return `[${m.role || '?'}] ${c.length > 200 ? c.slice(0, 200) + '\u2026' : c}`;
     }).join('\n');
-    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} \u2014 ${allMessages.length} msgs`, msgSummary);
+    const mode = useResponses ? 'Responses API' : 'Chat Completions';
+    const prevId = this.#responseId ? ` (prev: ${this.#responseId.slice(0, 16)}...)` : '';
+    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} [${mode}]${prevId} \u2014 ${itemsArray.length} items`, msgSummary);
 
     let responseData;
     const startTime = performance.now();
@@ -274,9 +283,17 @@ export class AgentRunner {
     }
     const duration = ((performance.now() - startTime) / 1000).toFixed(1);
 
-    const { content, inputTokens, outputTokens } = extractAiResponse(this.#settings.aiProvider, responseData);
+    const extracted = extractAiResponse(this.#settings.aiProvider, responseData, this.#settings);
+    const { content, inputTokens, outputTokens } = extracted;
+
+    // Track response ID for Responses API multi-turn
+    if (extracted.responseId) {
+      this.#responseId = extracted.responseId;
+    }
+
     const tokenInfo = inputTokens != null ? ` \u2014 in: ${inputTokens}, out: ${outputTokens}` : '';
-    this.#onLog('RECV', `200 OK \u2014 ${duration}s${tokenInfo}`, content || '(empty)');
+    const respIdInfo = extracted.responseId ? ` [${extracted.responseId.slice(0, 20)}...]` : '';
+    this.#onLog('RECV', `200 OK \u2014 ${duration}s${tokenInfo}${respIdInfo}`, content || '(empty)');
 
     if (!content) throw new Error('AI returned empty response');
 

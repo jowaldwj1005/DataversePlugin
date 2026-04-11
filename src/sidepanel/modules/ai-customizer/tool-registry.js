@@ -435,4 +435,156 @@ export function registerBuiltinTools(registry) {
       }
     },
   });
+
+  // -- Module Navigation (no confirmation) ------------------------------------
+
+  registry.registerBuiltin({
+    id: 'navigate_module',
+    name: 'Navigate to Module',
+    description: 'Switch the user to a different tab/module in the extension. Use this when the user needs to SEE a visual artifact (ERD diagram, query builder, etc.). Available modules: explorer, fetchxml, request, bulk, security, erd, erdpro, toolbuilder, formtools.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      tab: { type: 'string', required: true, description: 'Tab ID: explorer, fetchxml, request, bulk, security, erd, erdpro, toolbuilder, formtools' },
+      context: { type: 'object', description: 'Optional context to pass to the module (e.g. { solution: "Default" } for ERD)' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure(params.tab, params.context || null);
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'read_module_state',
+    name: 'Read Module State',
+    description: 'Read the current state of any module without switching tabs. Use this to see what the user is currently working on.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      tab: { type: 'string', required: true, description: 'Tab ID to read state from' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      const state = ctx.bridge.getModuleState(params.tab);
+      if (!state) return { loaded: false, note: 'Module has not been opened yet' };
+      return state;
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'load_fetchxml',
+    name: 'Load FetchXML Query',
+    description: 'Navigate to the FetchXML Builder and load a query. The user can then visually edit it or execute it.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      xml: { type: 'string', required: true, description: 'Complete FetchXML query string to load' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure('fetchxml', { xml: params.xml });
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'load_request',
+    name: 'Load Request',
+    description: 'Navigate to the Request Builder and load a request definition. The user can review, modify, and send it.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      method: { type: 'string', required: true, description: 'HTTP method: GET, POST, PATCH, DELETE' },
+      url: { type: 'string', required: true, description: 'Relative OData URL (e.g. "accounts?$select=name")' },
+      body: { type: 'object', description: 'Request body for POST/PATCH' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure('request', { method: params.method, url: params.url, body: params.body });
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'load_bulk_operations',
+    name: 'Load Bulk Operations',
+    description: 'Navigate to Bulk Operations and pre-load operations for user review. The user must approve and execute manually.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      operations: { type: 'array', required: true, description: 'Array of { method, url, body, description } operation definitions' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure('bulk', { operations: params.operations });
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'show_erd',
+    name: 'Show ERD',
+    description: 'Navigate to the ERD viewer and load a solution\'s entity-relationship diagram.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      solution: { type: 'string', required: true, description: 'Solution unique name to visualize' },
+      pro: { type: 'boolean', description: 'Use ERD Pro (documentation-grade) instead of standard ERD. Default: false.' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      const tab = params.pro ? 'erdpro' : 'erd';
+      return ctx.bridge.navigateAndConfigure(tab, { solution: params.solution });
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'show_security',
+    name: 'Show Security',
+    description: 'Navigate to the Security Inspector and show privileges for an entity.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      entity: { type: 'string', required: true, description: 'Entity logical name to inspect' },
+      tab: { type: 'string', description: 'Subtab: "entity-privileges" (default), "user-permissions", "field-security", "audit"' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure('security', { entity: params.entity, tab: params.tab || 'entity-privileges' });
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'generate_tool_schema',
+    name: 'Generate Tool Schema',
+    description: 'Navigate to the Tool Builder and generate an AI tool schema (JSON Schema) for a Dataverse entity.',
+    category: 'navigation',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      entity: { type: 'string', required: true, description: 'Entity logical name' },
+      format: { type: 'string', description: '"claude" (default), "openai", or "mcp"' },
+      mode: { type: 'string', description: '"create" (default), "update", or "read"' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.bridge) return { error: 'Module bridge not available' };
+      return ctx.bridge.navigateAndConfigure('toolbuilder', {
+        entity: params.entity,
+        format: params.format || 'claude',
+        mode: params.mode || 'create',
+      });
+    },
+  });
 }

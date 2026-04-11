@@ -12,9 +12,9 @@
 // Layout constants
 // ---------------------------------------------------------------------------
 
-const ENTITY_W = 220;
-const HEADER_H = 32;
-const FIELD_H = 18;
+const ENTITY_W = 250;
+const HEADER_H = 38;
+const FIELD_H = 20;
 const FIELD_PAD = 6;
 const COL_SIZE = 4;
 const H_GAP = 120;
@@ -665,6 +665,22 @@ export default class ErdViewer {
     } catch (err) {
       this._showNotification(`Failed to load solutions: ${err.message}`, 'error');
     }
+  }
+
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    if (ctx.solution) this._loadSolution(ctx.solution);
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      solution: this._solutionName || null,
+      entityCount: this._entities?.length || 0,
+      selectedEntity: this._selectedEntity || null,
+    };
   }
 
   async _loadSolution(uniqueName) {
@@ -1321,8 +1337,8 @@ export default class ErdViewer {
       }
     }
 
-    // Phase 1: Compute all arrow paths
-    const arrowPaths = new Map(); // schemaName → { rel, d, fx, fy, tx, ty, color }
+    // Phase 1: Compute all arrow paths as structured command arrays
+    const arrowPaths = new Map(); // schemaName → { rel, cmds, fx, fy, tx, ty, color }
     for (const rel of this._relationships) {
       const from = this._positions.get(rel.sourceEntity);
       const to = this._positions.get(rel.targetEntity);
@@ -1331,15 +1347,18 @@ export default class ErdViewer {
       if (rel.sourceEntity === rel.targetEntity) continue; // skip self-refs
       const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
-      let d;
+      let cmds;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
+        cmds = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
-        d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+        cmds = [
+          { type: 'M', args: [fx, fy] },
+          { type: 'C', args: [midX, fy, midX, ty, tx, ty] },
+        ];
       }
       const color = entityColorMap.get(rel.sourceEntity);
-      arrowPaths.set(rel.schemaName, { rel, d, fx, fy, tx, ty, color });
+      arrowPaths.set(rel.schemaName, { rel, cmds, fx, fy, tx, ty, color });
     }
 
     // Phase 2: Separate shared segments (post-routing nudge for overlapping paths)
@@ -1347,15 +1366,18 @@ export default class ErdViewer {
       this._separateSharedSegments(arrowPaths);
     }
 
-    // Phase 3: Draw arrows from computed paths
+    // Phase 2b: Add crossing bumps (operates on command arrays, not DOM)
+    if (this._routingMode === 'orthogonal') {
+      this._addCrossingBumps(arrowPaths);
+    }
+
+    // Phase 3: Serialize commands to d-strings and draw arrows (single serialization point)
     const arrowGroup = svgEl('g', { class: 'erd-arrows' });
     for (const [, entry] of arrowPaths) {
+      entry.d = this._serializeCommands(entry.cmds);
       arrowGroup.appendChild(this._drawArrowFromPath(entry));
     }
     this._svgRoot.appendChild(arrowGroup);
-
-    // Add crossing bumps (horizontal lines jump over vertical lines)
-    this._addCrossingBumps(arrowGroup);
 
     // Draw entity boxes (pass color map for header indicator)
     for (const ent of this._entities) {
@@ -1803,39 +1825,31 @@ export default class ErdViewer {
 
   /**
    * Post-routing pass: detect segments shared between different arrows and nudge them apart.
-   * Operates on the SVG path string 'd' in each arrowPaths entry.
+   * Operates on the command arrays (cmds) in each arrowPaths entry — no string parsing.
    */
   _separateSharedSegments(arrowPaths) {
     const LANE_STEP = 6;
-    const TOLERANCE = 2; // px tolerance for "same line"
+    const TOLERANCE = 2;
 
-    // Parse SVG path 'd' strings into segment arrays for analysis
-    // We only care about H/V segments in orthogonal paths
-    const segData = []; // { schema, isH, coord, min, max }
+    const segData = [];
 
     for (const [schema, entry] of arrowPaths) {
-      // Extract line segments from the SVG path
-      const segs = this._extractSegmentsFromPath(entry.d);
+      const segs = this._extractSegmentsFromCommands(entry.cmds);
       for (const seg of segs) {
         seg.schema = schema;
         segData.push(seg);
       }
     }
 
-    // Group horizontal segments by Y coordinate (within tolerance)
-    // Group vertical segments by X coordinate (within tolerance)
     const hGroups = this._groupSegments(segData.filter(s => s.isH), 'coord', TOLERANCE);
     const vGroups = this._groupSegments(segData.filter(s => !s.isH), 'coord', TOLERANCE);
 
-    // For each group with >1 segment from different arrows, compute overlap and assign offsets
-    const offsets = new Map(); // schema → cumulative offset { dx, dy }
+    const offsets = new Map();
 
     for (const group of [...hGroups, ...vGroups]) {
-      // Filter to segments that actually overlap in their span
       const overlapping = this._findOverlappingInGroup(group);
       if (overlapping.length <= 1) continue;
 
-      // Only separate segments from different schemas
       const uniqueSchemas = new Set(overlapping.map(s => s.schema));
       if (uniqueSchemas.size <= 1) continue;
 
@@ -1847,58 +1861,39 @@ export default class ErdViewer {
         if (Math.abs(offset) < 0.1) return;
         if (!offsets.has(schema)) offsets.set(schema, { dx: 0, dy: 0 });
         const o = offsets.get(schema);
-        if (isH) o.dy += offset; // horizontal segment → nudge in Y
-        else o.dx += offset;     // vertical segment → nudge in X
+        if (isH) o.dy += offset;
+        else o.dx += offset;
       });
     }
 
-    // Apply computed offsets by shifting the SVG path
     for (const [schema, { dx, dy }] of offsets) {
       if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) continue;
       const entry = arrowPaths.get(schema);
       if (!entry) continue;
-      // Shift the path by translating intermediate coordinates
-      entry.d = this._shiftPathString(entry.d, dx, dy);
+      this._shiftCommands(entry.cmds, dx, dy);
     }
   }
 
-  /** Extract H/V segments from an SVG path string. */
-  _extractSegmentsFromPath(d) {
+  /** Extract H/V segments from a command array (no string parsing). */
+  _extractSegmentsFromCommands(cmds) {
     const segs = [];
-    // Parse M, L, H, V commands and collect axis-aligned segments
     const coords = [];
-    const parts = d.match(/[MLHVQCA][^MLHVQCA]*/gi) || [];
     let cx = 0, cy = 0;
-    for (const part of parts) {
-      const cmd = part[0].toUpperCase();
-      const nums = part.slice(1).trim().split(/[\s,]+/).map(Number);
-      if (cmd === 'M' || cmd === 'L') {
-        cx = nums[0]; cy = nums[1];
-        coords.push({ x: cx, y: cy });
-      } else if (cmd === 'H') {
-        cx = nums[0];
-        coords.push({ x: cx, y: cy });
-      } else if (cmd === 'V') {
-        cy = nums[0];
-        coords.push({ x: cx, y: cy });
-      } else if (cmd === 'Q') {
-        // Quadratic bezier — just use end point
-        cx = nums[2]; cy = nums[3];
-        coords.push({ x: cx, y: cy });
-      } else if (cmd === 'C') {
-        cx = nums[4]; cy = nums[5];
-        coords.push({ x: cx, y: cy });
-      }
+    for (const c of cmds) {
+      const a = c.args;
+      if (c.type === 'M' || c.type === 'L') { cx = a[0]; cy = a[1]; coords.push({ x: cx, y: cy }); }
+      else if (c.type === 'H') { cx = a[0]; coords.push({ x: cx, y: cy }); }
+      else if (c.type === 'V') { cy = a[0]; coords.push({ x: cx, y: cy }); }
+      else if (c.type === 'Q') { cx = a[2]; cy = a[3]; coords.push({ x: cx, y: cy }); }
+      else if (c.type === 'C') { cx = a[4]; cy = a[5]; coords.push({ x: cx, y: cy }); }
+      else if (c.type === 'A') { cx = a[5]; cy = a[6]; coords.push({ x: cx, y: cy }); }
     }
-    // Build segments from consecutive coordinate pairs
     for (let i = 0; i < coords.length - 1; i++) {
       const a = coords[i], b = coords[i + 1];
       const dx = Math.abs(b.x - a.x), dy = Math.abs(b.y - a.y);
       if (dx < 1 && dy >= 1) {
-        // Vertical segment
         segs.push({ isH: false, coord: a.x, min: Math.min(a.y, b.y), max: Math.max(a.y, b.y) });
       } else if (dy < 1 && dx >= 1) {
-        // Horizontal segment
         segs.push({ isH: true, coord: a.y, min: Math.min(a.x, b.x), max: Math.max(a.x, b.x) });
       }
     }
@@ -1936,27 +1931,18 @@ export default class ErdViewer {
     return result;
   }
 
-  /** Shift an SVG path string by (dx, dy) on intermediate points. */
-  _shiftPathString(d, dx, dy) {
-    // Simple approach: adjust all numeric coordinates
-    // We only shift H coordinates by dx and V coordinates by dy
-    // For M, L, Q, C we shift both
-    const parts = d.match(/[MLHVQCA][^MLHVQCA]*/gi) || [];
-    const shifted = parts.map((part, idx) => {
-      const cmd = part[0].toUpperCase();
-      const nums = part.slice(1).trim().split(/[\s,]+/).map(Number);
-      // Don't shift first M (start point) or last coordinate pair (end point)
-      if (idx === 0) return part; // keep start
-      if (idx === parts.length - 1) return part; // keep end
-      if (cmd === 'H') return `H ${nums[0] + dx}`;
-      if (cmd === 'V') return `V ${nums[0] + dy}`;
-      if (cmd === 'M' || cmd === 'L') return `${cmd} ${nums[0] + dx} ${nums[1] + dy}`;
-      if (cmd === 'Q') return `Q ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy}`;
-      if (cmd === 'C') return `C ${nums[0] + dx} ${nums[1] + dy} ${nums[2] + dx} ${nums[3] + dy} ${nums[4] + dx} ${nums[5] + dy}`;
-      if (cmd === 'A') return `A ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5] + dx} ${nums[6] + dy}`;
-      return part;
-    });
-    return shifted.join(' ');
+  /** Shift intermediate commands in a command array by (dx, dy). Mutates in place. */
+  _shiftCommands(cmds, dx, dy) {
+    for (let i = 1; i < cmds.length - 1; i++) {
+      const c = cmds[i];
+      const a = c.args;
+      if (c.type === 'H') { a[0] += dx; }
+      else if (c.type === 'V') { a[0] += dy; }
+      else if (c.type === 'M' || c.type === 'L') { a[0] += dx; a[1] += dy; }
+      else if (c.type === 'Q') { a[0] += dx; a[1] += dy; a[2] += dx; a[3] += dy; }
+      else if (c.type === 'C') { a[0] += dx; a[1] += dy; a[2] += dx; a[3] += dy; a[4] += dx; a[5] += dy; }
+      else if (c.type === 'A') { a[5] += dx; a[6] += dy; }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -2068,6 +2054,16 @@ export default class ErdViewer {
     const exitDir = this._getExitDirection(fx, fy, srcEntity);
     const entryDir = this._getExitDirection(tx, ty, tgtEntity);
 
+    // Apply lane offset: shift start/end perpendicular to exit/entry direction.
+    // This flows naturally through stubs and A* routing — all waypoints stay orthogonal.
+    // Perpendicular of (dx,dy) is (-dy, dx).
+    if (laneOffset !== 0) {
+      fx += -exitDir.dy * laneOffset;
+      fy += exitDir.dx * laneOffset;
+      tx += -entryDir.dy * laneOffset;
+      ty += entryDir.dx * laneOffset;
+    }
+
     // Compute stubs: variable length so multiple arrows at same side spread out
     const srcPortIdx = this._getPortIndex(srcEntity, rel?.schemaName, 'src');
     const tgtPortIdx = this._getPortIndex(tgtEntity, rel?.schemaName, 'tgt');
@@ -2083,7 +2079,6 @@ export default class ErdViewer {
 
     // Build full waypoints: connection point → stub → A* path → stub → connection point
     const points = [{ x: fx, y: fy }, { x: sfx, y: sfy }];
-    // Add A* path (skip first point if it matches stub start)
     for (let i = 0; i < astarPath.length; i++) {
       const p = astarPath[i];
       const last = points[points.length - 1];
@@ -2097,52 +2092,45 @@ export default class ErdViewer {
     }
     points.push({ x: tx, y: ty });
 
-    // Apply lane offset per-segment: shift perpendicular to each segment's direction
-    if (laneOffset !== 0) {
-      for (let i = 1; i < points.length - 1; i++) {
-        const prev = points[i - 1];
-        const curr = points[i];
-        const next = points[i + 1];
-        // Determine dominant segment direction at this point
-        const dxIn = curr.x - prev.x, dyIn = curr.y - prev.y;
-        const dxOut = next.x - curr.x, dyOut = next.y - curr.y;
-        const isHIn = Math.abs(dxIn) > Math.abs(dyIn);
-        const isHOut = Math.abs(dxOut) > Math.abs(dyOut);
-        if (isHIn && isHOut) {
-          // Both segments horizontal → offset in Y
-          points[i] = { x: curr.x, y: curr.y + laneOffset };
-        } else if (!isHIn && !isHOut) {
-          // Both segments vertical → offset in X
-          points[i] = { x: curr.x + laneOffset, y: curr.y };
-        } else {
-          // Corner point: offset both axes to keep corner aligned
-          points[i] = { x: curr.x + laneOffset, y: curr.y + laneOffset };
-        }
-      }
-    }
-
-    return this._waypointsToSVGPath(points);
+    return this._waypointsToCommands(points);
   }
 
-  /** Fast 3-segment path for drag mode (no A*). */
+  /** Fast 3-segment path for drag mode (no A*). Returns command array. */
   _computeSimplePath(fx, fy, tx, ty, laneOffset = 0) {
-    // Degenerate: source and target at same point
-    if (Math.abs(tx - fx) < 1 && Math.abs(ty - fy) < 1) return `M ${fx} ${fy}`;
+    if (Math.abs(tx - fx) < 1 && Math.abs(ty - fy) < 1) return [{ type: 'M', args: [fx, fy] }];
     const midX = (fx + tx) / 2 + laneOffset;
     const midY = (fy + ty) / 2 + laneOffset;
     const r = CORNER_R;
     if (Math.abs(tx - fx) > Math.abs(ty - fy)) {
       const dx1 = midX - fx, dy = ty - fy, dx2 = tx - midX;
       const rc = Math.min(r, Math.abs(dx1) / 2, Math.abs(dy) / 2, Math.abs(dx2) / 2);
-      if (rc < 1 || dy === 0) return `M ${fx} ${fy} H ${midX} V ${ty} H ${tx}`;
+      if (rc < 1 || dy === 0) return [
+        { type: 'M', args: [fx, fy] }, { type: 'H', args: [midX] },
+        { type: 'V', args: [ty] }, { type: 'H', args: [tx] },
+      ];
       const sx1 = Math.sign(dx1), sy = Math.sign(dy), sx2 = Math.sign(dx2);
-      return `M ${fx} ${fy} H ${midX - rc * sx1} Q ${midX} ${fy} ${midX} ${fy + rc * sy} V ${ty - rc * sy} Q ${midX} ${ty} ${midX + rc * sx2} ${ty} H ${tx}`;
+      return [
+        { type: 'M', args: [fx, fy] }, { type: 'H', args: [midX - rc * sx1] },
+        { type: 'Q', args: [midX, fy, midX, fy + rc * sy] },
+        { type: 'V', args: [ty - rc * sy] },
+        { type: 'Q', args: [midX, ty, midX + rc * sx2, ty] },
+        { type: 'H', args: [tx] },
+      ];
     }
     const dy1 = midY - fy, dx = tx - fx, dy2 = ty - midY;
     const rc = Math.min(r, Math.abs(dy1) / 2, Math.abs(dx) / 2, Math.abs(dy2) / 2);
-    if (rc < 1 || dx === 0) return `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
+    if (rc < 1 || dx === 0) return [
+      { type: 'M', args: [fx, fy] }, { type: 'V', args: [midY] },
+      { type: 'H', args: [tx] }, { type: 'V', args: [ty] },
+    ];
     const sy1 = Math.sign(dy1), sx = Math.sign(dx), sy2 = Math.sign(dy2);
-    return `M ${fx} ${fy} V ${midY - rc * sy1} Q ${fx} ${midY} ${fx + rc * sx} ${midY} H ${tx - rc * sx} Q ${tx} ${midY} ${tx} ${midY + rc * sy2} V ${ty}`;
+    return [
+      { type: 'M', args: [fx, fy] }, { type: 'V', args: [midY - rc * sy1] },
+      { type: 'Q', args: [fx, midY, fx + rc * sx, midY] },
+      { type: 'H', args: [tx - rc * sx] },
+      { type: 'Q', args: [tx, midY, tx, midY + rc * sy2] },
+      { type: 'V', args: [ty] },
+    ];
   }
 
   /** Get the index of an arrow on its entity side (for variable stub length). */
@@ -2484,203 +2472,176 @@ export default class ErdViewer {
     ];
   }
 
-  /** Convert waypoint array to SVG path with rounded corners. */
-  _waypointsToSVGPath(points) {
-    if (points.length < 2) return '';
+  /** Serialize a command array to an SVG path `d` string (single point of serialization). */
+  static _CMD_ARITY = { M: 2, L: 2, H: 1, V: 1, Q: 4, C: 6, A: 7 };
+  _serializeCommands(cmds) {
+    if (!cmds || cmds.length === 0) return '';
+    const parts = [];
+    for (const c of cmds) {
+      if (!c || !c.type || !c.args) continue;
+      const arity = ErdViewer._CMD_ARITY[c.type];
+      // Guard: skip commands with wrong arg count, NaN, or Infinity
+      if (arity && c.args.length !== arity) continue;
+      if (c.args.some(n => !Number.isFinite(n))) continue;
+      parts.push(`${c.type} ${c.args.join(' ')}`);
+    }
+    return parts.join(' ');
+  }
+
+  /** Convert waypoint array to structured command array with rounded corners. */
+  _waypointsToCommands(points) {
+    if (points.length < 2) return [];
     // Filter out NaN/undefined waypoints
     const valid = points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
-    if (valid.length < 2) return '';
+    if (valid.length < 2) return [];
     if (valid.length === 2) {
-      return `M ${valid[0].x} ${valid[0].y} L ${valid[1].x} ${valid[1].y}`;
+      return [
+        { type: 'M', args: [valid[0].x, valid[0].y] },
+        { type: 'L', args: [valid[1].x, valid[1].y] },
+      ];
     }
 
-    const parts = [`M ${valid[0].x} ${valid[0].y}`];
+    const cmds = [{ type: 'M', args: [valid[0].x, valid[0].y] }];
 
     for (let i = 1; i < valid.length - 1; i++) {
       const prev = valid[i - 1];
       const curr = valid[i];
       const next = valid[i + 1];
 
-      // Direction from prev to curr
       const dx1 = curr.x - prev.x, dy1 = curr.y - prev.y;
-      // Direction from curr to next
       const dx2 = next.x - curr.x, dy2 = next.y - curr.y;
 
-      // Zero-length segment — skip
       if (dx1 === 0 && dy1 === 0) continue;
 
-      // If collinear, skip corner (just continue the segment)
       if ((dx1 === 0 && dx2 === 0) || (dy1 === 0 && dy2 === 0)) {
-        if (dy1 === 0) parts.push(`H ${curr.x}`);
-        else parts.push(`V ${curr.y}`);
+        if (dy1 === 0) cmds.push({ type: 'H', args: [curr.x] });
+        else cmds.push({ type: 'V', args: [curr.y] });
         continue;
       }
 
-      // Rounded corner
       const segLen1 = Math.abs(dx1) + Math.abs(dy1);
       const segLen2 = Math.abs(dx2) + Math.abs(dy2);
       const rc = Math.min(CORNER_R, segLen1 / 2, segLen2 / 2);
 
       if (rc < 1) {
-        // Too small for a curve
-        if (dy1 === 0) parts.push(`H ${curr.x}`);
-        else parts.push(`V ${curr.y}`);
+        if (dy1 === 0) cmds.push({ type: 'H', args: [curr.x] });
+        else cmds.push({ type: 'V', args: [curr.y] });
         continue;
       }
 
       const sdx1 = Math.sign(dx1) || 0, sdy1 = Math.sign(dy1) || 0;
       const sdx2 = Math.sign(dx2) || 0, sdy2 = Math.sign(dy2) || 0;
 
-      // Approach point (rc before the corner)
       const ax = curr.x - sdx1 * rc * (dy1 === 0 ? 1 : 0);
       const ay = curr.y - sdy1 * rc * (dx1 === 0 ? 1 : 0);
-      // Departure point (rc after the corner)
       const dpx = curr.x + sdx2 * rc * (dy2 === 0 ? 1 : 0);
       const dpy = curr.y + sdy2 * rc * (dx2 === 0 ? 1 : 0);
 
-      if (dy1 === 0) parts.push(`H ${ax}`);
-      else parts.push(`V ${ay}`);
+      if (dy1 === 0) cmds.push({ type: 'H', args: [ax] });
+      else cmds.push({ type: 'V', args: [ay] });
 
-      parts.push(`Q ${curr.x} ${curr.y} ${dpx} ${dpy}`);
+      cmds.push({ type: 'Q', args: [curr.x, curr.y, dpx, dpy] });
     }
 
-    // Final segment to last point
     const last = valid[valid.length - 1];
     const penult = valid[valid.length - 2];
-    if (Math.abs(last.y - penult.y) < 1) parts.push(`H ${last.x}`);
-    else parts.push(`V ${last.y}`);
+    if (Math.abs(last.y - penult.y) < 1) cmds.push({ type: 'H', args: [last.x] });
+    else cmds.push({ type: 'V', args: [last.y] });
 
-    return parts.join(' ');
+    return cmds;
   }
 
   // -------------------------------------------------------------------------
   // Crossing bumps: horizontal lines jump over vertical lines
   // -------------------------------------------------------------------------
 
-  _addCrossingBumps(arrowGroup) {
-    const paths = arrowGroup.querySelectorAll('path');
-    if (paths.length < 2) return;
+  /**
+   * Add crossing bumps: horizontal lines jump over vertical lines.
+   * Operates on command arrays in the arrowPaths map — no DOM/string parsing.
+   * Mutates the cmds arrays in place by splicing arc commands into H segments.
+   */
+  _addCrossingBumps(arrowPaths) {
+    const entries = [...arrowPaths.values()];
+    if (entries.length < 2) return;
 
-    // Extract H and V segments from each path
-    const hSegs = []; // { y, x1, x2, pathIdx }
-    const vSegs = []; // { x, y1, y2, pathIdx }
+    // Extract H and V segments from each arrow's commands
+    const hSegs = []; // { y, x1, x2, entryIdx }
+    const vSegs = []; // { x, y1, y2, entryIdx }
 
-    paths.forEach((p, idx) => {
-      const d = p.getAttribute('d');
-      if (!d) return;
-      // Parse path into coordinate pairs by tracking M, H, V, L commands
-      // (ignore Q/C arcs — they're tiny corner radii)
-      const tokens = d.match(/[MHVLQCA][^MHVLQCA]*/gi);
-      if (!tokens) return;
-
+    entries.forEach((entry, idx) => {
       let cx = 0, cy = 0;
-      for (const tok of tokens) {
-        const cmd = tok[0].toUpperCase();
-        const nums = tok.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-        if (cmd === 'M' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
-        else if (cmd === 'H' && nums.length >= 1) {
-          const nx = nums[0];
-          hSegs.push({ y: cy, x1: Math.min(cx, nx), x2: Math.max(cx, nx), pathIdx: idx });
+      for (const c of entry.cmds) {
+        const a = c.args;
+        if (c.type === 'M') { cx = a[0]; cy = a[1]; }
+        else if (c.type === 'H') {
+          const nx = a[0];
+          hSegs.push({ y: cy, x1: Math.min(cx, nx), x2: Math.max(cx, nx), entryIdx: idx });
           cx = nx;
-        } else if (cmd === 'V' && nums.length >= 1) {
-          const ny = nums[0];
-          vSegs.push({ x: cx, y1: Math.min(cy, ny), y2: Math.max(cy, ny), pathIdx: idx });
+        } else if (c.type === 'V') {
+          const ny = a[0];
+          vSegs.push({ x: cx, y1: Math.min(cy, ny), y2: Math.max(cy, ny), entryIdx: idx });
           cy = ny;
-        } else if (cmd === 'L' && nums.length >= 2) { cx = nums[0]; cy = nums[1]; }
-        else if (cmd === 'Q' && nums.length >= 4) { cx = nums[2]; cy = nums[3]; }
-        else if (cmd === 'C' && nums.length >= 6) { cx = nums[4]; cy = nums[5]; }
-        else if (cmd === 'A' && nums.length >= 7) { cx = nums[5]; cy = nums[6]; }
+        } else if (c.type === 'L') { cx = a[0]; cy = a[1]; }
+        else if (c.type === 'Q') { cx = a[2]; cy = a[3]; }
+        else if (c.type === 'C') { cx = a[4]; cy = a[5]; }
+        else if (c.type === 'A') { cx = a[5]; cy = a[6]; }
       }
     });
 
     // Find crossings: H seg intersects V seg from different paths
-    // Collect bumps per path (keyed by pathIdx)
-    const bumpsPerPath = new Map();
-
+    const bumpsPerEntry = new Map();
     for (const h of hSegs) {
       for (const v of vSegs) {
-        if (h.pathIdx === v.pathIdx) continue;
-        // Intersection: v.x within h range AND h.y within v range (with margin)
+        if (h.entryIdx === v.entryIdx) continue;
         if (v.x > h.x1 + BUMP_R && v.x < h.x2 - BUMP_R &&
             h.y > v.y1 + BUMP_R && h.y < v.y2 - BUMP_R) {
-          if (!bumpsPerPath.has(h.pathIdx)) bumpsPerPath.set(h.pathIdx, []);
-          bumpsPerPath.get(h.pathIdx).push({ x: v.x, y: h.y });
+          if (!bumpsPerEntry.has(h.entryIdx)) bumpsPerEntry.set(h.entryIdx, []);
+          bumpsPerEntry.get(h.entryIdx).push({ x: v.x, y: h.y });
         }
       }
     }
 
-    // For each path with bumps, rebuild its d string with arc jumps
-    for (const [pathIdx, bumps] of bumpsPerPath) {
-      const p = paths[pathIdx];
-      const d = p.getAttribute('d');
+    // For each arrow with bumps, rebuild its command array with arc insertions
+    for (const [entryIdx, bumps] of bumpsPerEntry) {
+      const entry = entries[entryIdx];
+      const oldCmds = entry.cmds;
+      const newCmds = [];
+      let cx = 0, cy = 0;
 
-      // Find H segments and insert bumps into them
-      let newD = d;
-      // Sort bumps by x so we process left to right
       bumps.sort((a, b) => a.x - b.x);
 
-      // Replace H segments that contain bump points
-      // Strategy: parse and rebuild the path
-      const tokens = d.match(/[MHVLQCA][^MHVLQCA]*/gi);
-      if (!tokens) continue;
-
-      const parts = [];
-      let cx = 0, cy = 0;
-      for (const tok of tokens) {
-        const cmd = tok[0].toUpperCase();
-        const nums = tok.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-
-        if (cmd === 'H' && nums.length >= 1) {
-          const nx = nums[0];
-          // Find bumps on this H segment
+      for (const c of oldCmds) {
+        if (c.type === 'H') {
+          const nx = c.args[0];
           const segBumps = bumps.filter(b =>
             Math.abs(b.y - cy) < 1 &&
             b.x > Math.min(cx, nx) + BUMP_R &&
             b.x < Math.max(cx, nx) - BUMP_R
           );
           if (segBumps.length > 0) {
-            // Sort by direction of travel
             const dir = nx > cx ? 1 : -1;
             segBumps.sort((a, b) => (a.x - b.x) * dir);
-            let curX = cx;
             for (const b of segBumps) {
-              parts.push(`H ${b.x - BUMP_R}`);
-              // Semicircle arc: sweep up then back down
-              parts.push(`A ${BUMP_R} ${BUMP_R} 0 0 1 ${b.x + BUMP_R} ${cy}`);
-              curX = b.x + BUMP_R;
+              newCmds.push({ type: 'H', args: [b.x - BUMP_R] });
+              newCmds.push({ type: 'A', args: [BUMP_R, BUMP_R, 0, 0, 1, b.x + BUMP_R, cy] });
             }
-            parts.push(`H ${nx}`);
+            newCmds.push({ type: 'H', args: [nx] });
           } else {
-            parts.push(`H ${nx}`);
+            newCmds.push(c);
           }
           cx = nx;
         } else {
-          // Reconstruct command from parsed values to avoid passing through garbled tokens
-          if (cmd === 'M' && nums.length >= 2) {
-            parts.push(`M ${nums[0]} ${nums[1]}`);
-            cx = nums[0]; cy = nums[1];
-          } else if (cmd === 'V' && nums.length >= 1) {
-            parts.push(`V ${nums[0]}`);
-            cy = nums[0];
-          } else if (cmd === 'L' && nums.length >= 2) {
-            parts.push(`L ${nums[0]} ${nums[1]}`);
-            cx = nums[0]; cy = nums[1];
-          } else if (cmd === 'Q' && nums.length >= 4) {
-            parts.push(`Q ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]}`);
-            cx = nums[2]; cy = nums[3];
-          } else if (cmd === 'C' && nums.length >= 6) {
-            parts.push(`C ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5]}`);
-            cx = nums[4]; cy = nums[5];
-          } else if (cmd === 'A' && nums.length >= 7) {
-            parts.push(`A ${nums[0]} ${nums[1]} ${nums[2]} ${nums[3]} ${nums[4]} ${nums[5]} ${nums[6]}`);
-            cx = nums[5]; cy = nums[6];
-          } else {
-            // Skip unrecognized or garbled tokens (e.g. V with NaN)
-          }
+          newCmds.push(c);
+          const a = c.args;
+          if (c.type === 'M' || c.type === 'L') { cx = a[0]; cy = a[1]; }
+          else if (c.type === 'V') { cy = a[0]; }
+          else if (c.type === 'Q') { cx = a[2]; cy = a[3]; }
+          else if (c.type === 'C') { cx = a[4]; cy = a[5]; }
+          else if (c.type === 'A') { cx = a[5]; cy = a[6]; }
         }
       }
 
-      p.setAttribute('d', parts.join(' '));
+      entry.cmds = newCmds;
     }
   }
 
@@ -2801,19 +2762,22 @@ export default class ErdViewer {
 
       const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
 
-      let d;
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
+      let cmds;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
+        cmds = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
-        d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+        cmds = [
+          { type: 'M', args: [fx, fy] },
+          { type: 'C', args: [midX, fy, midX, ty, tx, ty] },
+        ];
       }
 
+      // During drag: serialize directly (no bumps — fast path)
       const path = ag.querySelector('path');
-      if (path) path.setAttribute('d', d);
+      if (path) path.setAttribute('d', this._serializeCommands(cmds));
 
-      // Update connection dots
       const dots = ag.querySelectorAll('.erd-connection-dot');
       if (dots.length === 2) {
         dots[0].setAttribute('cx', fx);
@@ -2831,6 +2795,8 @@ export default class ErdViewer {
     this._portOffsets = this._computePortOffsets();
     const laneOffsets = this._routingMode === 'orthogonal' ? this._assignLanes() : new Map();
 
+    // Build command arrays for all arrows, apply post-processing, then serialize once
+    const arrowPaths = new Map();
     for (const ag of arrowGroups) {
       const schema = ag.getAttribute('data-schema');
       const rel = this._relationships.find(r => r.schemaName === schema);
@@ -2841,28 +2807,37 @@ export default class ErdViewer {
 
       const { fx, fy, tx, ty } = this._computeEndpoints(rel, from, to);
       const laneOffset = laneOffsets.get(rel.schemaName) || 0;
-      let d;
+      let cmds;
       if (this._routingMode === 'orthogonal') {
-        d = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
+        cmds = this._computeOrthogonalPath(fx, fy, tx, ty, laneOffset, rel.sourceEntity, rel.targetEntity, rel);
       } else {
         const midX = (fx + tx) / 2;
-        d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
+        cmds = [
+          { type: 'M', args: [fx, fy] },
+          { type: 'C', args: [midX, fy, midX, ty, tx, ty] },
+        ];
       }
-      const path = ag.querySelector('path');
-      if (path) path.setAttribute('d', d);
-
-      const dots = ag.querySelectorAll('.erd-connection-dot');
-      if (dots.length === 2) {
-        dots[0].setAttribute('cx', fx);
-        dots[0].setAttribute('cy', fy);
-        dots[1].setAttribute('cx', tx);
-        dots[1].setAttribute('cy', ty);
-      }
+      arrowPaths.set(schema, { cmds, ag, fx, fy, tx, ty });
     }
 
-    // Re-add crossing bumps
-    const arrowParent = this._svgRoot.querySelector('.erd-arrows');
-    if (arrowParent) this._addCrossingBumps(arrowParent);
+    // Apply crossing bumps on structured data
+    if (this._routingMode === 'orthogonal') {
+      this._addCrossingBumps(arrowPaths);
+    }
+
+    // Serialize once and apply to DOM
+    for (const [, entry] of arrowPaths) {
+      const path = entry.ag.querySelector('path');
+      if (path) path.setAttribute('d', this._serializeCommands(entry.cmds));
+
+      const dots = entry.ag.querySelectorAll('.erd-connection-dot');
+      if (dots.length === 2) {
+        dots[0].setAttribute('cx', entry.fx);
+        dots[0].setAttribute('cy', entry.fy);
+        dots[1].setAttribute('cx', entry.tx);
+        dots[1].setAttribute('cy', entry.ty);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

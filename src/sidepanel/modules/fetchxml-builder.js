@@ -984,6 +984,22 @@ export class FetchXmlBuilder {
   getXml() { return modelToXml(this.model); }
   getModel() { return { ...this.model }; }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  setContext(ctx) {
+    if (ctx.xml) this.loadXml(ctx.xml);
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    return {
+      entity: this.model?.entity || null,
+      xml: this.model?.entity ? this.getXml() : null,
+      outputMode: this._outputMode,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Layout
   // -------------------------------------------------------------------------

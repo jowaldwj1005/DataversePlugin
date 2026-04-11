@@ -9,6 +9,7 @@ export class ToolExecutor {
   #registry;
   #api;
   #cache;
+  #bridge = null;
   #onConfirmation;  // (tool, params, reasoning) => Promise<boolean>
   #onLog;
 
@@ -26,6 +27,11 @@ export class ToolExecutor {
     this.#cache = cache;
     this.#onConfirmation = onConfirmation;
     this.#onLog = onLog;
+  }
+
+  /** Set the module bridge (called after app is available). */
+  setBridge(bridge) {
+    this.#bridge = bridge;
   }
 
   /**
@@ -67,6 +73,7 @@ export class ToolExecutor {
         api: this.#api,
         cache: this.#cache,
         log: this.#onLog,
+        bridge: this.#bridge,
       };
       const result = await tool.handler(params, ctx);
       const duration = ((performance.now() - startTime) / 1000).toFixed(1);

@@ -322,6 +322,29 @@ class ApiExplorer {
     this._injectStyles();
   }
 
+  // -- Module Bridge integration ----------------------------------------------
+
+  /** Receive context from the AI agent. */
+  async setContext(ctx) {
+    if (ctx.entity) {
+      await this._navigateToEntity(ctx.entity);
+    }
+  }
+
+  /** Expose current state to the AI agent. */
+  getContext() {
+    // Extract entity name from selected node ID (format: "entity_<logicalname>")
+    const selected = this._selectedNodeId;
+    let selectedEntity = null;
+    if (selected?.startsWith('entity_')) {
+      selectedEntity = selected.slice(7);
+    }
+    return {
+      selectedEntity,
+      filter: this._filter || null,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Public API
   // -------------------------------------------------------------------------
@@ -379,9 +402,40 @@ class ApiExplorer {
     this._treeContainer = treePane;
     layout.appendChild(treePane);
 
+    // Resize handle between tree and detail pane
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = `${CSS}-resize-handle`;
+    layout.appendChild(resizeHandle);
+
     // Detail pane
     const detailPane = document.createElement('div');
     detailPane.className = `${CSS}-detail-pane`;
+    const savedWidth = parseInt(sessionStorage.getItem('dvt-explorer-detail-width'), 10);
+    if (savedWidth >= 150 && savedWidth <= 800) detailPane.style.width = `${savedWidth}px`;
+
+    // Resize drag logic
+    let dragging = false;
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      dragging = true;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const layoutRect = layout.getBoundingClientRect();
+      const newWidth = layoutRect.right - e.clientX;
+      if (newWidth >= 150 && newWidth <= 800) {
+        detailPane.style.width = `${newWidth}px`;
+      }
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      sessionStorage.setItem('dvt-explorer-detail-width', parseInt(detailPane.style.width, 10));
+    });
     this._detailPanel = new DetailPanel(detailPane, {
       title: 'Details',
       showSearch: true,
@@ -2161,9 +2215,24 @@ class ApiExplorer {
         border-right: 1px solid var(--dvt-border, #e0e0e0);
         outline: none;
       }
+      .${CSS}-resize-handle {
+        width: 5px;
+        cursor: col-resize;
+        background: transparent;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 2;
+        transition: background 0.15s;
+      }
+      .${CSS}-resize-handle:hover,
+      .${CSS}-resize-handle:active {
+        background: var(--dvt-accent, #0078d4);
+        opacity: 0.4;
+      }
       .${CSS}-detail-pane {
         width: 320px;
-        min-width: 200px;
+        min-width: 150px;
+        max-width: 800px;
         flex-shrink: 0;
         overflow: hidden;
       }
