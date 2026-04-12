@@ -14,6 +14,9 @@
   ],
   "host_permissions": [
     "https://*.dynamics.com/*",
+    "https://*.powerapps.com/*",
+    "https://*.powerplatform.com/*",
+    "https://*.microsoftdynamics.com/*",
     "https://*.openai.com/*",
     "https://*.openai.azure.com/*",
     "https://api.anthropic.com/*"
@@ -35,12 +38,22 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.dynamics.com/*"],
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.powerapps.com/*",
+        "https://*.powerplatform.com/*",
+        "https://*.microsoftdynamics.com/*"
+      ],
       "js": ["src/content/content-script.js"],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://*.dynamics.com/*"],
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.powerapps.com/*",
+        "https://*.powerplatform.com/*",
+        "https://*.microsoftdynamics.com/*"
+      ],
       "js": ["src/content/page-extractor.js"],
       "run_at": "document_idle",
       "world": "MAIN"
@@ -55,7 +68,12 @@
   "web_accessible_resources": [
     {
       "resources": ["src/*"],
-      "matches": ["https://*.dynamics.com/*"]
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.powerapps.com/*",
+        "https://*.powerplatform.com/*",
+        "https://*.microsoftdynamics.com/*"
+      ]
     }
   ]
 }

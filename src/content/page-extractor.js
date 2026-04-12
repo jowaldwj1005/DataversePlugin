@@ -6,7 +6,12 @@
  * It communicates with the content script (ISOLATED world) via window.postMessage.
  *
  * This approach avoids CSP issues with inline <script> injection.
+ *
+ * Wrapped in an IIFE so that re-injection via chrome.scripting.executeScript
+ * does not cause const-redeclaration errors — both injections share the
+ * same execution context.
  */
+(() => {
 
 const SOURCE = 'dataverse-toolkit-page';
 
@@ -38,11 +43,11 @@ function extract() {
 
     // Fallback: derive environment info from the page URL if Xrm is not available
     if (!clientUrl) {
-      const origin = window.location.origin; // e.g. https://orgXXX.crm.dynamics.com
-      if (origin.includes('.dynamics.com')) {
+      const origin = window.location.origin;
+      const hostname = window.location.hostname;
+      if (hostname.endsWith('.dynamics.com') || hostname.endsWith('.microsoftdynamics.com')) {
         clientUrl = origin;
-        // Extract org name from subdomain: "orgXXX.crm.dynamics.com" → "orgXXX"
-        const hostParts = window.location.hostname.split('.');
+        const hostParts = hostname.split('.');
         if (hostParts.length > 0) {
           orgName = hostParts[0];
         }
@@ -410,3 +415,5 @@ async function executeApiRequest(reqDef, requestId) {
     }, '*');
   }
 }
+
+})();

@@ -171,29 +171,54 @@ function sendMessageToTab(tabId, message) {
  * @param {number} tabId
  */
 async function injectContentScripts(tabId) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['src/content/content-script.js'],
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId, world: 'MAIN' },
-      files: ['src/content/page-extractor.js'],
-    });
-    // Brief delay for scripts to register their message listeners
-    await new Promise((r) => setTimeout(r, 300));
-  } catch {
-    throw new Error('Content script not ready — refresh the Dynamics 365 page and try again.');
+  const MAX_ATTEMPTS = 3;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['src/content/content-script.js'],
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['src/content/page-extractor.js'],
+        world: 'MAIN',
+      });
+      // Wait for scripts to register their message listeners
+      await new Promise((r) => setTimeout(r, 500));
+      return; // injection succeeded
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
   }
+
+  throw new Error(
+    `Content script injection failed — refresh the page and try again. (${lastError?.message || 'unknown'})`,
+  );
 }
 
 /**
  * Find a Dynamics 365 tab to proxy API requests through.
  * @returns {Promise<number|null>} Tab ID or null
  */
+const DYNAMICS_URL_PATTERNS = [
+  'https://*.dynamics.com/*',
+  'https://*.powerapps.com/*',
+  'https://*.powerplatform.com/*',
+  'https://*.microsoftdynamics.com/*',
+];
+
 async function findDynamicsTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://*.dynamics.com/*' });
-  return tabs.length > 0 ? tabs[0].id : null;
+  const tabs = await chrome.tabs.query({ url: DYNAMICS_URL_PATTERNS });
+  // Filter out discarded/unloaded tabs — they can't run content scripts
+  const active = tabs.filter((t) => t.status !== 'unloaded' && !t.discarded);
+  // Prefer dynamics.com tabs (most likely to have Xrm/session cookies)
+  const preferred = active.find((t) => t.url?.includes('.dynamics.com'));
+  return (preferred || active[0])?.id ?? null;
 }
 
 /**
@@ -392,14 +417,16 @@ async function handleMessage(message, sender) {
         const tabId = await findDynamicsTab();
         if (!tabId) throw new Error('No Dynamics 365 tab found. Open a Dynamics 365 page first.');
 
+        const sendInspect = () => sendMessageToTab(tabId, { type: 'FORM_INSPECT_VIA_PAGE', payload });
+
         let result;
         try {
-          result = await sendMessageToTab(tabId, { type: 'FORM_INSPECT_VIA_PAGE', payload });
+          result = await sendInspect();
         } catch (err) {
           const msg = err.message || '';
           if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
             await injectContentScripts(tabId);
-            result = await sendMessageToTab(tabId, { type: 'FORM_INSPECT_VIA_PAGE', payload });
+            result = await sendInspect();
           } else {
             throw err;
           }

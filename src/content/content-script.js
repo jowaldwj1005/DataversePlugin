@@ -7,7 +7,12 @@
  *
  * The page-extractor.js is loaded as a separate content script with
  * "world": "MAIN" in the manifest, avoiding CSP issues with inline scripts.
+ *
+ * Wrapped in an IIFE so that re-injection via chrome.scripting.executeScript
+ * (after extension reload) does not cause const-redeclaration errors — both
+ * injections share the same isolated world.
  */
+(() => {
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -177,4 +182,6 @@ if (extractionTimerId) clearInterval(extractionTimerId);
 extractionTimerId = setInterval(() => {
   requestExtraction();
 }, TOKEN_REFRESH_INTERVAL_MS);
+
+})();
 
