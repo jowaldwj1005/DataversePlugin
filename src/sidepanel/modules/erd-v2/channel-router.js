@@ -43,7 +43,9 @@ export class ChannelRouter {
       const srcSize = entitySizes.get(rel.sourceEntity);
       const tgtSize = entitySizes.get(rel.targetEntity);
       if (!srcPos || !tgtPos || !srcSize || !tgtSize) continue;
+      if (rel.sourceEntity === rel.targetEntity) continue; // skip self-ref
 
+      // Straight line from source center to target center
       const sx = srcPos.x + srcSize.w / 2;
       const sy = srcPos.y + srcSize.h / 2;
       const tx = tgtPos.x + tgtSize.w / 2;

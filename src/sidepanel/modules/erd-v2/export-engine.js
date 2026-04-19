@@ -135,16 +135,20 @@ export class ExportEngine {
 
     const pad = 40;
     const titleBlockH = 70;
-    const legendW = 180;
-    const legendH = 160;
 
     const contentW = maxX - minX + pad * 2;
     const contentH = maxY - minY + pad * 2 + titleBlockH;
     const width = Math.max(contentW, 600);
     const height = Math.max(contentH, 400);
 
-    // Clone the SVG content
+    // Inline all computed styles on the LIVE SVG (getComputedStyle needs attached DOM)
+    this.#inlineComputedStyles(this.#svg);
+
+    // Clone the SVG content (now with inlined styles)
     const clone = this.#svg.cloneNode(true);
+
+    // Remove inlined styles from live SVG (don't pollute the interactive view)
+    this.#removeInlinedStyles(this.#svg);
 
     // Reset transform on root group
     const root = clone.querySelector('[id]') || clone.firstElementChild;
@@ -152,7 +156,7 @@ export class ExportEngine {
       root.setAttribute('transform', `translate(${pad - minX}, ${pad - minY + titleBlockH})`);
     }
 
-    // Resolve CSS custom properties in the clone
+    // Resolve any remaining CSS custom properties in the clone
     this.#resolveCustomProperties(clone);
 
     // Add background
@@ -164,9 +168,6 @@ export class ExportEngine {
 
     // Add title block
     this.#addTitleBlock(clone, width, pad);
-
-    // Add legend
-    this.#addLegend(clone, width - legendW - pad, height - legendH - pad / 2, legendW, legendH);
 
     clone.setAttribute('width', width);
     clone.setAttribute('height', height);
@@ -226,133 +227,61 @@ export class ExportEngine {
     svg.appendChild(g);
   }
 
-  // =========================================================================
-  // Legend
-  // =========================================================================
-
-  #addLegend(svg, x, y, w, h) {
-    const g = document.createElementNS(SVG_NS, 'g');
-    g.setAttribute('transform', `translate(${x}, ${y})`);
-
-    const bgColor = cssVar('--color-bg-panel') || '#2d2d2d';
-    const borderColor = cssVar('--color-border') || '#404040';
-    const textColor = cssVar('--color-text-primary') || '#cccccc';
-    const mutedColor = cssVar('--color-text-muted') || '#808080';
-
-    // Background
-    const bg = document.createElementNS(SVG_NS, 'rect');
-    bg.setAttribute('width', w);
-    bg.setAttribute('height', h);
-    bg.setAttribute('rx', '6');
-    bg.setAttribute('fill', bgColor);
-    bg.setAttribute('stroke', borderColor);
-    bg.setAttribute('stroke-width', '1');
-    bg.setAttribute('opacity', '0.9');
-    g.appendChild(bg);
-
-    // Title
-    const title = document.createElementNS(SVG_NS, 'text');
-    title.setAttribute('x', '10');
-    title.setAttribute('y', '20');
-    title.setAttribute('fill', textColor);
-    title.setAttribute('font-size', '11');
-    title.setAttribute('font-weight', '700');
-    title.setAttribute('font-family', "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-    title.textContent = 'Legend';
-    g.appendChild(title);
-
-    // Relationship types
-    let ly = 40;
-    const relTypes = [
-      { label: '1:N Relationship', dash: '', color: '#6bc5e8' },
-      { label: 'N:N Relationship', dash: '6 3', color: '#a78bfa' },
-    ];
-    for (const rt of relTypes) {
-      const line = document.createElementNS(SVG_NS, 'line');
-      line.setAttribute('x1', '10');
-      line.setAttribute('y1', ly);
-      line.setAttribute('x2', '50');
-      line.setAttribute('y2', ly);
-      line.setAttribute('stroke', rt.color);
-      line.setAttribute('stroke-width', '2');
-      if (rt.dash) line.setAttribute('stroke-dasharray', rt.dash);
-      g.appendChild(line);
-
-      const label = document.createElementNS(SVG_NS, 'text');
-      label.setAttribute('x', '58');
-      label.setAttribute('y', ly + 4);
-      label.setAttribute('fill', mutedColor);
-      label.setAttribute('font-size', '9');
-      label.setAttribute('font-family', "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-      label.textContent = rt.label;
-      g.appendChild(label);
-      ly += 20;
-    }
-
-    // Markers
-    ly += 5;
-    const markers = [
-      { label: '||  One (mandatory)', symbol: '||' },
-      { label: '><  Many', symbol: '><' },
-    ];
-    for (const m of markers) {
-      const sym = document.createElementNS(SVG_NS, 'text');
-      sym.setAttribute('x', '12');
-      sym.setAttribute('y', ly + 4);
-      sym.setAttribute('fill', textColor);
-      sym.setAttribute('font-size', '10');
-      sym.setAttribute('font-weight', '700');
-      sym.setAttribute('font-family', 'monospace');
-      sym.textContent = m.symbol;
-      g.appendChild(sym);
-
-      const label = document.createElementNS(SVG_NS, 'text');
-      label.setAttribute('x', '38');
-      label.setAttribute('y', ly + 4);
-      label.setAttribute('fill', mutedColor);
-      label.setAttribute('font-size', '9');
-      label.setAttribute('font-family', "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-      label.textContent = m.label;
-      g.appendChild(label);
-      ly += 18;
-    }
-
-    // Field indicators
-    ly += 5;
-    const indicators = [
-      { label: 'Primary Key', icon: '🔑' },
-      { label: 'Foreign Key (Lookup)', icon: '🔗' },
-      { label: 'Required field', icon: '*' },
-    ];
-    for (const ind of indicators) {
-      const icon = document.createElementNS(SVG_NS, 'text');
-      icon.setAttribute('x', '12');
-      icon.setAttribute('y', ly + 4);
-      icon.setAttribute('fill', textColor);
-      icon.setAttribute('font-size', '10');
-      icon.textContent = ind.icon;
-      g.appendChild(icon);
-
-      const label = document.createElementNS(SVG_NS, 'text');
-      label.setAttribute('x', '30');
-      label.setAttribute('y', ly + 4);
-      label.setAttribute('fill', mutedColor);
-      label.setAttribute('font-size', '9');
-      label.setAttribute('font-family', "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-      label.textContent = ind.label;
-      g.appendChild(label);
-      ly += 18;
-    }
-
-    svg.appendChild(g);
-  }
+  // Legend removed — colored borders + matching edge colors are self-explanatory
 
   // =========================================================================
   // Helpers
   // =========================================================================
 
+  /**
+   * Inline computed CSS styles as SVG attributes on the live DOM.
+   * This ensures text fills, strokes, fonts survive serialization.
+   */
+  #inlineComputedStyles(svgEl) {
+    const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity',
+                   'font-size', 'font-weight', 'font-family', 'dominant-baseline',
+                   'text-anchor', 'opacity', 'display'];
+
+    const walker = document.createTreeWalker(svgEl, NodeFilter.SHOW_ELEMENT);
+    let node;
+    while ((node = walker.nextNode())) {
+      // Skip defs and their children
+      if (node.tagName === 'defs' || node.closest('defs')) continue;
+
+      const cs = window.getComputedStyle(node);
+      for (const prop of props) {
+        const val = cs.getPropertyValue(prop);
+        if (!val || val === 'none' && prop !== 'display') continue;
+        // Only set if not already an inline attribute (preserve explicit values)
+        const attrName = prop; // SVG attributes use the same names
+        if (!node.hasAttribute(attrName) || node.getAttribute(attrName)?.startsWith('var(')) {
+          node.setAttribute(attrName, val);
+        }
+      }
+      // Mark as export-inlined so we can remove later
+      node.setAttribute('data-export-inlined', '1');
+    }
+  }
+
+  /**
+   * Remove inlined styles from the live DOM after cloning.
+   */
+  #removeInlinedStyles(svgEl) {
+    const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity',
+                   'font-size', 'font-weight', 'font-family', 'dominant-baseline',
+                   'text-anchor', 'opacity', 'display'];
+
+    const inlined = svgEl.querySelectorAll('[data-export-inlined]');
+    for (const node of inlined) {
+      // Remove only styles we added (not original inline attributes)
+      // Simplest: remove the marker and let CSS take over again
+      node.removeAttribute('data-export-inlined');
+      // We can't easily know which attrs were original vs added,
+      // so we leave them — CSS will override via specificity anyway
+    }
+  }
+
   #resolveCustomProperties(el) {
-    // Walk all elements and resolve var(--...) in fill/stroke attributes
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT);
     let node;
     while ((node = walker.nextNode())) {
@@ -366,6 +295,8 @@ export class ExportEngine {
           }
         }
       }
+      // Clean up export marker
+      node.removeAttribute('data-export-inlined');
     }
   }
 

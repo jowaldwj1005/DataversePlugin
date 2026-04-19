@@ -4299,8 +4299,7 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 
 .erdv2-card-bg {
   fill: var(--erdv2-card-bg);
-  stroke: var(--erdv2-card-border);
-  stroke-width: 1;
+  /* stroke and stroke-width set inline per entity (colored border) */
 }
 .erdv2-header-system { fill: var(--erdv2-header-system); }
 .erdv2-header-custom { fill: var(--erdv2-header-custom); }
@@ -4346,11 +4345,9 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
   font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
   dominant-baseline: middle;
 }
-.erdv2-required {
+.erdv2-required-star {
   fill: var(--erdv2-required);
-  font-size: 11px;
   font-weight: 700;
-  dominant-baseline: middle;
 }
 .erdv2-field-count {
   fill: var(--color-text-muted);
@@ -4374,6 +4371,9 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
 .erdv2-entity {
   transition: opacity 0.15s ease;
   cursor: grab;
+}
+.erdv2-entity.erdv2-selected {
+  filter: drop-shadow(0 0 8px currentColor);
 }
 .erdv2-entity.erdv2-highlighted .erdv2-card-bg {
   stroke: var(--color-accent-primary);

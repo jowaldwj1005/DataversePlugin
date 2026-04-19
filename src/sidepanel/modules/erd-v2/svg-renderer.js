@@ -30,6 +30,7 @@ export class SvgRenderer {
   #entityEls = new Map();
   #edgeEls = new Map();
   #entityColorMap = new Map();  // entityName → color (for edges)
+  #parentEntities = new Set();  // entities that have children (1:N source)
   #edgeLayer;
   #entityLayer;
   #defs;
@@ -118,14 +119,20 @@ export class SvgRenderer {
 
   applyHighlight(entityName) {
     const adj = this.#state.adjacency.get(entityName) || new Set();
+    // Use the entity's edge color for the selection border
+    const selColor = this.#entityColorMap.get(entityName) || '#0078d4';
 
     for (const [name, g] of this.#entityEls) {
-      if (name === entityName || adj.has(name)) {
+      g.classList.remove('erdv2-selected', 'erdv2-highlighted', 'erdv2-faded');
+      if (name === entityName) {
+        g.classList.add('erdv2-selected');
+        const bg = g.querySelector('.erdv2-card-bg');
+        if (bg) { bg.setAttribute('stroke', selColor); bg.setAttribute('stroke-width', '4'); }
+        g.style.filter = `drop-shadow(0 0 8px ${selColor})`;
+      } else if (adj.has(name)) {
         g.classList.add('erdv2-highlighted');
-        g.classList.remove('erdv2-faded');
       } else {
         g.classList.add('erdv2-faded');
-        g.classList.remove('erdv2-highlighted');
       }
     }
 
@@ -142,8 +149,16 @@ export class SvgRenderer {
   }
 
   clearHighlight() {
-    for (const g of this.#entityEls.values()) {
-      g.classList.remove('erdv2-highlighted', 'erdv2-faded');
+    for (const [name, g] of this.#entityEls) {
+      g.classList.remove('erdv2-selected', 'erdv2-highlighted', 'erdv2-faded');
+      g.style.filter = '';
+      // Restore original border: thick colored for parents, thin gray for leaves
+      const bg = g.querySelector('.erdv2-card-bg');
+      if (bg) {
+        const isParent = this.#parentEntities.has(name);
+        bg.setAttribute('stroke', isParent ? this.#entityColorMap.get(name) : 'var(--erdv2-card-border)');
+        bg.setAttribute('stroke-width', isParent ? '2.5' : '1');
+      }
     }
     for (const g of this.#edgeEls.values()) {
       g.classList.remove('erdv2-highlighted', 'erdv2-faded');
@@ -174,10 +189,17 @@ export class SvgRenderer {
       'data-entity': name,
     });
 
-    // Background rect with shadow
+    // Parent entities get thick colored border, leaf entities get thin gray
+    const entityColor = this.#entityColorMap.get(name);
+    const isParent = entityColor && this.#parentEntities.has(name);
+    const borderColor = isParent ? entityColor : 'var(--erdv2-card-border)';
+    const borderWidth = isParent ? '2.5' : '1';
+
+    // Background rect
     g.appendChild(svgEl('rect', {
       class: 'erdv2-card-bg',
       width: w, height: h, rx: CORNER_R,
+      stroke: borderColor, 'stroke-width': borderWidth,
       filter: 'url(#erdv2-shadow)',
     }));
 
@@ -268,23 +290,24 @@ export class SvgRenderer {
     nameEl.textContent = field.displayName;
     g.appendChild(nameEl);
 
+    // Type badge with optional required indicator inline
+    const typeLabel = field.required ? `* ${attrTypeShort(field.type)}` : attrTypeShort(field.type);
     const badge = svgEl('text', {
       class: 'erdv2-type-badge',
       x: w - 8, y: y + FIELD_H / 2 + 1,
       'text-anchor': 'end',
     });
-    badge.textContent = attrTypeShort(field.type);
-    g.appendChild(badge);
-
     if (field.required) {
-      const req = svgEl('text', {
-        class: 'erdv2-required',
-        x: w - 28, y: y + FIELD_H / 2 + 1,
-        'text-anchor': 'end',
-      });
-      req.textContent = '*';
-      g.appendChild(req);
+      // Red asterisk as a tspan, type in normal color
+      const star = svgEl('tspan');
+      star.setAttribute('class', 'erdv2-required-star');
+      star.textContent = '* ';
+      badge.appendChild(star);
+      badge.appendChild(document.createTextNode(attrTypeShort(field.type)));
+    } else {
+      badge.textContent = attrTypeShort(field.type);
     }
+    g.appendChild(badge);
   }
 
   // =========================================================================
@@ -312,12 +335,8 @@ export class SvgRenderer {
       'stroke-width': '1.8',
     });
 
-    if (rel.type === '1:N') {
-      path.setAttribute('marker-start', 'url(#erdv2-cf-one-one)');
-      path.setAttribute('marker-end', 'url(#erdv2-cf-many)');
-    } else if (rel.type === 'N:N') {
-      path.setAttribute('marker-start', 'url(#erdv2-cf-many)');
-      path.setAttribute('marker-end', 'url(#erdv2-cf-many)');
+    // N:N edges dashed, 1:N solid — no markers for now (needs edge-clipping math)
+    if (rel.type === 'N:N') {
       path.setAttribute('stroke-dasharray', '6 3');
     }
 
@@ -400,24 +419,31 @@ export class SvgRenderer {
   }
 
   /**
-   * Build a color map: each entity that is a source (parent) in any 1:N
-   * relationship gets a unique color. All edges from that parent share it.
+   * Build a color map: every entity gets a unique color.
+   * Parents (1:N sources) are assigned first, then remaining entities.
+   * Edges use the source entity's color.
    */
   #buildEntityColorMap() {
     this.#entityColorMap.clear();
-    const parents = new Set();
+    this.#parentEntities.clear();
+    // Parents first (so their edges and border match)
+    const parents = [];
     for (const rel of this.#state.relationships) {
-      if (rel.type === '1:N') parents.add(rel.sourceEntity);
+      if (rel.type === '1:N' && !this.#entityColorMap.has(rel.sourceEntity)) {
+        this.#entityColorMap.set(rel.sourceEntity, null);
+        this.#parentEntities.add(rel.sourceEntity);
+        parents.push(rel.sourceEntity);
+      }
     }
     let idx = 0;
-    for (const parent of parents) {
-      this.#entityColorMap.set(parent, ARROW_COLORS[idx % ARROW_COLORS.length]);
+    for (const p of parents) {
+      this.#entityColorMap.set(p, ARROW_COLORS[idx % ARROW_COLORS.length]);
       idx++;
     }
-    // N:N relationships — use the first entity's color or fallback
-    for (const rel of this.#state.relationships) {
-      if (rel.type === 'N:N' && !this.#entityColorMap.has(rel.sourceEntity)) {
-        this.#entityColorMap.set(rel.sourceEntity, ARROW_COLORS[idx % ARROW_COLORS.length]);
+    // Then all remaining entities (leaf nodes — no colored border)
+    for (const ent of this.#state.entities) {
+      if (!this.#entityColorMap.has(ent.LogicalName)) {
+        this.#entityColorMap.set(ent.LogicalName, ARROW_COLORS[idx % ARROW_COLORS.length]);
         idx++;
       }
     }
