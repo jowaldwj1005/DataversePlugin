@@ -154,25 +154,30 @@ export function registerBuiltinTools(registry) {
 
   registry.registerBuiltin({
     id: 'get_entities',
-    name: 'List Entities',
-    description: 'Get a list of all entities in the environment with their logical names, display names, and entity set names.',
+    name: 'Search Entities',
+    description: 'Search for entities by name. Always provide a filter — never dump all entities. Returns logical name, display name, and entity set name.',
     category: 'metadata',
     requiresConfirmation: false,
     autoApprovable: false,
     params: {
-      filter: { type: 'string', description: 'Optional: filter string to search entity names (case-insensitive)' },
+      filter: { type: 'string', required: true, description: 'Search string to match against entity logical name or display name (case-insensitive). Use a prefix like "account", "bec_", or a keyword like "contact".' },
+      top: { type: 'number', description: 'Max results to return (default: 25, max: 50)' },
     },
     skillFiles: [],
     handler: async (params, ctx) => {
+      if (!params.filter) return { error: 'A filter is required. Search by name, prefix, or keyword.' };
       const entities = await ctx.cache.getEntities();
-      if (params.filter) {
-        const f = params.filter.toLowerCase();
-        return entities.filter(e =>
-          e.LogicalName.toLowerCase().includes(f) ||
-          (e.DisplayName?.UserLocalizedLabel?.Label || '').toLowerCase().includes(f)
-        ).map(e => ({ LogicalName: e.LogicalName, DisplayName: e.DisplayName?.UserLocalizedLabel?.Label, EntitySetName: e.EntitySetName }));
+      const f = params.filter.toLowerCase();
+      const matches = entities.filter(e =>
+        e.LogicalName.toLowerCase().includes(f) ||
+        (e.DisplayName?.UserLocalizedLabel?.Label || '').toLowerCase().includes(f)
+      ).map(e => ({ LogicalName: e.LogicalName, DisplayName: e.DisplayName?.UserLocalizedLabel?.Label, EntitySetName: e.EntitySetName }));
+      const limit = Math.min(Math.max(params.top || 25, 1), 50);
+      const result = matches.slice(0, limit);
+      if (matches.length > limit) {
+        return { matches: result, total: matches.length, note: `Showing ${limit} of ${matches.length} matches. Refine your filter for more specific results.` };
       }
-      return entities.map(e => ({ LogicalName: e.LogicalName, DisplayName: e.DisplayName?.UserLocalizedLabel?.Label, EntitySetName: e.EntitySetName }));
+      return result;
     },
   });
 
@@ -443,12 +448,12 @@ export function registerBuiltinTools(registry) {
   registry.registerBuiltin({
     id: 'navigate_module',
     name: 'Navigate to Module',
-    description: 'Switch the user to a different tab/module in the extension. Use this when the user needs to SEE a visual artifact (ERD diagram, query builder, etc.). Available modules: explorer, fetchxml, request, bulk, security, erd, erdpro, toolbuilder, formtools.',
+    description: 'Switch the user to a different tab/module in the extension. Use this when the user needs to SEE a visual artifact (ERD diagram, query builder, etc.). Available modules: explorer, fetchxml, request, bulk, security, erd, erdv2, toolbuilder, formtools.',
     category: 'navigation',
     requiresConfirmation: false,
     autoApprovable: false,
     params: {
-      tab: { type: 'string', required: true, description: 'Tab ID: explorer, fetchxml, request, bulk, security, erd, erdpro, toolbuilder, formtools' },
+      tab: { type: 'string', required: true, description: 'Tab ID: explorer, fetchxml, request, bulk, security, erd, erdv2, toolbuilder, formtools' },
       context: { type: 'object', description: 'Optional context to pass to the module (e.g. { solution: "Default" } for ERD)' },
     },
     skillFiles: [],
@@ -544,7 +549,7 @@ export function registerBuiltinTools(registry) {
     skillFiles: [],
     handler: async (params, ctx) => {
       if (!ctx.bridge) return { error: 'Module bridge not available' };
-      const tab = params.pro ? 'erdpro' : 'erd';
+      const tab = params.pro ? 'erdv2' : 'erd';
       return ctx.bridge.navigateAndConfigure(tab, { solution: params.solution });
     },
   });
