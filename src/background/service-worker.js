@@ -498,9 +498,15 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 });
 
 // When a Dynamics 365 tab finishes loading, ask content script for env info.
+// Also detect URL changes (SPA navigation) and notify the side panel.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url?.includes('.dynamics.com')) {
     chrome.tabs.sendMessage(tabId, { type: 'REQUEST_TOKEN_REFRESH' }).catch(() => {});
+  }
+
+  // Detect URL changes on Dynamics 365 tabs (e.g. navigating between records)
+  if (changeInfo.url && tab.url?.includes('.dynamics.com')) {
+    chrome.runtime.sendMessage({ type: 'PAGE_CHANGED', url: changeInfo.url }).catch(() => {});
   }
 });
 

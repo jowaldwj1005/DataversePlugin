@@ -117,13 +117,21 @@ export class ModuleBridge {
    * Reads state from the active module (if not the AI tab itself).
    */
   buildContextForPrompt() {
+    const parts = [];
+
+    // Include the current Dynamics 365 page URL if available
+    const pageUrl = this.#app._pageUrl;
+    if (pageUrl) {
+      parts.push(`## Current Page\nURL: ${pageUrl}`);
+    }
+
     const activeTab = this.getActiveTab();
     if (!activeTab || activeTab === 'aicustomizer' || activeTab === 'settings') {
-      return '';
+      return parts.join('\n\n');
     }
 
     const state = this.getModuleState(activeTab);
-    if (!state) return '';
+    if (!state) return parts.join('\n\n');
 
     const label = this.getTabLabel(activeTab);
     let section = `## Current User Context\nThe user is currently on the **${label}** tab.\n`;
@@ -155,6 +163,7 @@ export class ModuleBridge {
       }
     }
 
-    return section;
+    parts.push(section);
+    return parts.join('\n\n');
   }
 }

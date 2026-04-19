@@ -33,22 +33,26 @@ const DEFAULT_SETTINGS = Object.freeze({
   aiApiKey: '',
   aiModel: '',
   aiMaxTokens: 4096,
-  aiAzureApiMode: 'chat',  // 'chat' (Chat Completions) or 'responses' (Responses API)
+  aiApiMode: 'responses',  // 'responses' (Responses API) or 'chat' (Chat Completions) — applies to OpenAI/Azure/Custom
+  aiReasoning: '',         // '' (off) | 'low' | 'medium' | 'high' — Responses API only
+  aiWebSearch: '',         // '' (off) | 'auto' | 'required' — Responses API only
 });
 
-const TAB_DEFINITIONS = Object.freeze([
+const ALL_TABS = Object.freeze([
+  { id: 'aicustomizer', label: 'Agent', icon: '\u2728', tip: 'Dataverse Agent — BYOK conversational AI with full plugin access' },
   { id: 'explorer', label: 'Explorer', icon: '\uD83D\uDD0D', tip: 'Browse tables, columns, relationships, solutions, and custom APIs' },
   { id: 'fetchxml', label: 'Query', icon: '\uD83D\uDCC4', tip: 'Visual FetchXML / OData query builder with code generation' },
   { id: 'request', label: 'Request', icon: '\u26A1', tip: 'Send raw Web API requests with autocomplete and response viewer' },
-  { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6', tip: 'Batch operations: create, update, delete, assign, export/import' },
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12', tip: 'Role privileges, user permissions, field-level security' },
   { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F', tip: 'Entity-relationship diagrams for any solution' },
+  { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6', tip: 'Batch operations: create, update, delete, assign, export/import' },
   { id: 'erdpro', label: 'ERD Pro', icon: '\uD83D\uDCD0', tip: 'Documentation-grade ERD with channel routing and print-ready export' },
   { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9', tip: 'Generate AI tool schemas (Claude/OpenAI/MCP) from entity metadata' },
-  { id: 'aicustomizer', label: 'AI', icon: '\u2728', tip: 'Modify and create views via natural language (BYOK: OpenAI/Azure/Anthropic)' },
   { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB', tip: 'Inspect and interact with the current form context' },
   { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F', tip: 'Theme, cache, AI provider configuration' },
 ]);
+
+const STORAGE_KEY_SIDEBAR = 'dvt-sidebar-pinned';
 
 // ---------------------------------------------------------------------------
 // Event Bus
@@ -224,7 +228,7 @@ class DataverseToolkit {
     this.cache.init(this.api);
     this.events = new EventBus();
 
-    this._activeTab = TAB_DEFINITIONS[0].id;
+    this._activeTab = 'explorer'; // updated after settings load
     this._modules = {};
     this._moduleLoaders = {};
     this._connected = false;
@@ -232,8 +236,11 @@ class DataverseToolkit {
     this._settings = { ...DEFAULT_SETTINGS };
     this._toastQueue = [];
     this._modalStack = [];
+    this._pageUrl = null;
+    this._sidebarPinned = false;
 
     this._root = null;
+    this._sidebar = null;
     this._tabContent = null;
     this._statusBar = null;
   }
@@ -244,6 +251,14 @@ class DataverseToolkit {
 
   async init() {
     await this._loadSettings();
+    // AI-first: default to Agent tab when AI is configured
+    const hasAi = this._settings.aiProvider && this._settings.aiApiKey;
+    this._activeTab = hasAi ? 'aicustomizer' : 'explorer';
+    // Restore sidebar pin state
+    try {
+      const r = await chrome.storage.local.get(STORAGE_KEY_SIDEBAR);
+      this._sidebarPinned = !!r[STORAGE_KEY_SIDEBAR];
+    } catch { /* ignore */ }
     this._applyTheme(this._settings.theme);
     this._buildShell();
     this._attachKeyboardShortcuts();
@@ -259,10 +274,17 @@ class DataverseToolkit {
     // Set up periodic connection checks
     setInterval(() => this._checkConnection(), 30000);
 
-    // Listen for environment changes from the background
+    // Listen for environment changes and page navigation from the background
     chrome.runtime?.onMessage?.addListener((message) => {
       if (message.type === 'ENV_CHANGED') {
         this._checkConnection();
+      }
+      if (message.type === 'PAGE_CHANGED') {
+        this._pageUrl = message.url || null;
+        const mod = this._modules.formtools;
+        if (mod && typeof mod.onPageChanged === 'function') {
+          mod.onPageChanged();
+        }
       }
     });
   }
@@ -279,6 +301,11 @@ class DataverseToolkit {
         this._environment = env;
         this._updateConnectionStatus(true, env);
         this.events.emit('connected', env);
+        // Capture current page URL from the active Dynamics 365 tab
+        try {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tab?.url?.includes('.dynamics.com')) this._pageUrl = tab.url;
+        } catch { /* side panel may not have tabs permission context */ }
         // Auto-load the active tab on first connection
         if (!this._modules[this._activeTab]) {
           this._initModule(this._activeTab);
@@ -335,22 +362,27 @@ class DataverseToolkit {
     // Header
     root.appendChild(this._buildHeader());
 
-    // Main content area
+    // Main content area — sidebar + content in a row
     const main = document.createElement('div');
     main.className = `${CSS_PREFIX}-main`;
 
-    // Tab bar
-    main.appendChild(this._buildTabBar());
+    // Sidebar (VS Code-style icon rail)
+    this._sidebar = this._buildSidebar();
+    main.appendChild(this._sidebar);
 
-    // Tab content container
+    // Content wrapper (tab content + welcome)
+    const contentWrap = document.createElement('div');
+    contentWrap.className = `${CSS_PREFIX}-content-wrap`;
+
     const tabContent = document.createElement('div');
     tabContent.className = `${CSS_PREFIX}-tab-content`;
     this._tabContent = tabContent;
-    main.appendChild(tabContent);
+    contentWrap.appendChild(tabContent);
 
     // Welcome screen (shown when disconnected)
-    main.appendChild(this._buildWelcomeScreen());
+    contentWrap.appendChild(this._buildWelcomeScreen());
 
+    main.appendChild(contentWrap);
     root.appendChild(main);
 
     // Quick chat bar (only if AI configured)
@@ -378,7 +410,7 @@ class DataverseToolkit {
 
     this._injectStyles();
 
-    // Activate first tab
+    // Activate default tab
     this._switchTab(this._activeTab);
   }
 
@@ -406,22 +438,106 @@ class DataverseToolkit {
     return header;
   }
 
-  _buildTabBar() {
-    const bar = document.createElement('div');
-    bar.className = `${CSS_PREFIX}-tab-bar`;
+  /** Returns tab groups based on AI configuration. */
+  _getTabGroups() {
+    const hasAi = this._settings.aiProvider && this._settings.aiApiKey;
+    return {
+      primary: hasAi
+        ? ['aicustomizer', 'explorer', 'fetchxml']
+        : ['explorer', 'fetchxml', 'request'],
+      secondary: hasAi
+        ? ['request', 'security', 'erd']
+        : ['security', 'erd', 'aicustomizer'],
+      tertiary: ['bulk', 'erdpro', 'toolbuilder', 'formtools'],
+      pinned: ['settings'],
+    };
+  }
 
-    for (let i = 0; i < TAB_DEFINITIONS.length; i++) {
-      const tab = TAB_DEFINITIONS[i];
+  /** Returns flat ordered list of all tab IDs for keyboard shortcuts. */
+  _getOrderedTabIds() {
+    const g = this._getTabGroups();
+    return [...g.primary, ...g.secondary, ...g.tertiary, ...g.pinned];
+  }
+
+  _buildSidebar() {
+    const nav = document.createElement('nav');
+    nav.className = `${CSS_PREFIX}-sidebar${this._sidebarPinned ? ' pinned' : ''}`;
+
+    this._populateSidebar(nav);
+    return nav;
+  }
+
+  _populateSidebar(nav) {
+    nav.innerHTML = '';
+    const groups = this._getTabGroups();
+    const hasAi = this._settings.aiProvider && this._settings.aiApiKey;
+    const tabMap = Object.fromEntries(ALL_TABS.map(t => [t.id, t]));
+    let shortcutIdx = 1;
+
+    const addItem = (id, group) => {
+      const tab = tabMap[id];
+      if (!tab) return;
       const btn = document.createElement('button');
-      btn.className = `${CSS_PREFIX}-tab-btn${tab.id === this._activeTab ? ' active' : ''}`;
-      btn.dataset.tab = tab.id;
-      btn.title = `${tab.tip || tab.label} (Ctrl+${i + 1})`;
-      btn.innerHTML = `<span class="${CSS_PREFIX}-tab-icon">${tab.icon}</span><span class="${CSS_PREFIX}-tab-label">${tab.label}</span>`;
-      btn.addEventListener('click', () => this._switchTab(tab.id));
-      bar.appendChild(btn);
-    }
+      const isActive = id === this._activeTab;
+      const isAgent = id === 'aicustomizer';
+      let cls = `${CSS_PREFIX}-sidebar-item`;
+      if (isActive) cls += ' active';
+      if (group === 'tertiary') cls += ' tertiary';
+      if (isAgent && !hasAi && group === 'secondary') cls += ' unconfigured';
+      if (isAgent && hasAi) cls += ' agent-glow';
+      btn.className = cls;
+      btn.dataset.tab = id;
+      const sc = shortcutIdx <= 9 ? ` (Ctrl+${shortcutIdx})` : '';
+      btn.title = `${tab.tip || tab.label}${sc}`;
+      btn.innerHTML = `<span class="${CSS_PREFIX}-sidebar-icon">${tab.icon}</span><span class="${CSS_PREFIX}-sidebar-label">${tab.label}</span>`;
+      btn.addEventListener('click', () => this._switchTab(id));
+      nav.appendChild(btn);
+      shortcutIdx++;
+    };
 
-    return bar;
+    const addSep = () => {
+      const sep = document.createElement('div');
+      sep.className = `${CSS_PREFIX}-sidebar-sep`;
+      nav.appendChild(sep);
+    };
+
+    // Pin toggle
+    const pin = document.createElement('button');
+    pin.className = `${CSS_PREFIX}-sidebar-pin`;
+    pin.title = this._sidebarPinned ? 'Collapse sidebar' : 'Pin sidebar open';
+    pin.textContent = this._sidebarPinned ? '\u00AB' : '\u00BB'; // « / »
+    pin.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._sidebarPinned = !this._sidebarPinned;
+      nav.classList.toggle('pinned', this._sidebarPinned);
+      pin.textContent = this._sidebarPinned ? '\u00AB' : '\u00BB';
+      pin.title = this._sidebarPinned ? 'Collapse sidebar' : 'Pin sidebar open';
+      chrome.storage.local.set({ [STORAGE_KEY_SIDEBAR]: this._sidebarPinned }).catch(() => {});
+    });
+    nav.appendChild(pin);
+
+    // Primary group
+    for (const id of groups.primary) addItem(id, 'primary');
+    addSep();
+
+    // Secondary group
+    for (const id of groups.secondary) addItem(id, 'secondary');
+    addSep();
+
+    // Tertiary group
+    for (const id of groups.tertiary) addItem(id, 'tertiary');
+
+    // Settings — pinned to bottom
+    const spacer = document.createElement('div');
+    spacer.className = `${CSS_PREFIX}-sidebar-spacer`;
+    nav.appendChild(spacer);
+    addItem('settings', 'pinned');
+  }
+
+  /** Rebuild sidebar when AI settings change (e.g., key added/removed). */
+  _rebuildSidebar() {
+    if (!this._sidebar) return;
+    this._populateSidebar(this._sidebar);
   }
 
   _buildStatusBar() {
@@ -577,7 +693,7 @@ class DataverseToolkit {
    * @param {Object|null} context — passed to module.setContext() after render
    */
   switchTab(tabId, context = null) {
-    if (!TAB_DEFINITIONS.find((t) => t.id === tabId)) return;
+    if (!ALL_TABS.find((t) => t.id === tabId)) return;
 
     // Notify current module it's being hidden (pause timers etc.)
     if (this._activeTab && this._modules[this._activeTab]?.onHide) {
@@ -586,8 +702,8 @@ class DataverseToolkit {
 
     this._activeTab = tabId;
 
-    // Update tab bar active state
-    this._root?.querySelectorAll(`.${CSS_PREFIX}-tab-btn`).forEach((btn) => {
+    // Update sidebar active state
+    this._sidebar?.querySelectorAll(`.${CSS_PREFIX}-sidebar-item`).forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tab === tabId);
     });
 
@@ -811,9 +927,12 @@ class DataverseToolkit {
         <label class="${CSS_PREFIX}-settings-label">Endpoint URL</label>
         <input id="setting-ai-endpoint" type="url" class="${CSS_PREFIX}-settings-input"
                value="${this._settings.aiEndpoint || ''}"
-               placeholder="https://api.openai.com/v1" />
-        <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;">
-          OpenAI: https://api.openai.com/v1 · Azure: https://YOUR.openai.azure.com/openai/deployments/MODEL · Anthropic: https://api.anthropic.com/v1
+               placeholder="Full endpoint URL (see examples below)" />
+        <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;line-height:1.5;">
+          Enter the complete URL to POST to. Examples:<br/>
+          OpenAI: https://api.openai.com/v1/responses<br/>
+          Azure: https://YOUR.openai.azure.com/openai/deployments/MODEL/responses?api-version=2025-04-01-preview<br/>
+          Anthropic: https://api.anthropic.com/v1/messages
         </small>
       </div>
 
@@ -834,15 +953,37 @@ class DataverseToolkit {
                placeholder="gpt-4o / claude-sonnet-4-5-20250514 / ..." />
       </div>
 
-      <div class="${CSS_PREFIX}-settings-group" id="ai-azure-mode-group" style="display:${this._settings.aiProvider === 'azure' ? 'block' : 'none'};">
-        <label class="${CSS_PREFIX}-settings-label">Azure API Mode</label>
-        <select id="setting-ai-azure-mode" class="${CSS_PREFIX}-settings-select">
-          <option value="chat"${this._settings.aiAzureApiMode !== 'responses' ? ' selected' : ''}>Chat Completions</option>
-          <option value="responses"${this._settings.aiAzureApiMode === 'responses' ? ' selected' : ''}>Responses API</option>
+      <div class="${CSS_PREFIX}-settings-group" id="ai-api-mode-group" style="display:${this._settings.aiProvider && this._settings.aiProvider !== 'anthropic' ? 'block' : 'none'};">
+        <label class="${CSS_PREFIX}-settings-label">API Mode</label>
+        <select id="setting-ai-api-mode" class="${CSS_PREFIX}-settings-select">
+          <option value="responses"${this._settings.aiApiMode !== 'chat' ? ' selected' : ''}>Responses API</option>
+          <option value="chat"${this._settings.aiApiMode === 'chat' ? ' selected' : ''}>Chat Completions</option>
         </select>
         <small style="color:var(--color-text-muted);font-size:0.7rem;margin-top:2px;display:block;">
-          Chat Completions: /chat/completions · Responses API: /responses (newer, supports web search grounding)
+          Responses API: /responses (default, newer) · Chat Completions: /chat/completions (legacy)
         </small>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group" id="ai-reasoning-group" style="display:${this._settings.aiProvider && this._settings.aiProvider !== 'anthropic' && this._settings.aiApiMode !== 'chat' ? 'block' : 'none'};">
+        <label class="${CSS_PREFIX}-settings-label">Reasoning</label>
+        <div id="setting-ai-reasoning" style="display:flex;gap:4px;">
+          ${['', 'low', 'medium', 'high'].map(v => {
+            const label = v || 'off';
+            const active = (this._settings.aiReasoning || '') === v;
+            return `<button data-value="${v}" class="${CSS_PREFIX}-btn-secondary" style="flex:1;padding:4px 0;font-size:0.72rem;${active ? 'background:var(--color-accent);color:var(--color-bg);' : ''}">${label}</button>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="${CSS_PREFIX}-settings-group" id="ai-websearch-group" style="display:${this._settings.aiProvider && this._settings.aiProvider !== 'anthropic' && this._settings.aiApiMode !== 'chat' ? 'block' : 'none'};">
+        <label class="${CSS_PREFIX}-settings-label">Web Search</label>
+        <div id="setting-ai-websearch" style="display:flex;gap:4px;">
+          ${['', 'auto', 'required'].map(v => {
+            const label = v || 'off';
+            const active = (this._settings.aiWebSearch || '') === v;
+            return `<button data-value="${v}" class="${CSS_PREFIX}-btn-secondary" style="flex:1;padding:4px 0;font-size:0.72rem;${active ? 'background:var(--color-accent);color:var(--color-bg);' : ''}">${label}</button>`;
+          }).join('')}
+        </div>
       </div>
 
       <div class="${CSS_PREFIX}-settings-group" id="ai-endpoint-preview-group" style="display:none;">
@@ -859,7 +1000,7 @@ class DataverseToolkit {
       <div class="${CSS_PREFIX}-settings-group">
         <label class="${CSS_PREFIX}-settings-label">Keyboard Shortcuts</label>
         <div class="${CSS_PREFIX}-shortcuts-list">
-          <div class="${CSS_PREFIX}-shortcut"><kbd>Ctrl+1</kbd> - <kbd>Ctrl+5</kbd> Switch tabs</div>
+          <div class="${CSS_PREFIX}-shortcut"><kbd>Ctrl+1</kbd> - <kbd>Ctrl+9</kbd> Switch tabs</div>
           <div class="${CSS_PREFIX}-shortcut"><kbd>Ctrl+Enter</kbd> Execute current query</div>
           <div class="${CSS_PREFIX}-shortcut"><kbd>Ctrl+Shift+F</kbd> Focus search</div>
           <div class="${CSS_PREFIX}-shortcut"><kbd>Escape</kbd> Close modals/panels</div>
@@ -895,38 +1036,25 @@ class DataverseToolkit {
       this._applyTheme(this._settings.theme);
     });
 
-    // AI endpoint preview — updates live as provider/endpoint change
+    // AI endpoint preview — updates live as provider/endpoint/mode change
     const _updateAiPreview = () => {
       const provider = container.querySelector('#setting-ai-provider')?.value || '';
+      const apiMode = container.querySelector('#setting-ai-api-mode')?.value || 'responses';
       const endpoint = (container.querySelector('#setting-ai-endpoint')?.value || '').replace(/\/+$/, '');
-      const azureMode = container.querySelector('#setting-ai-azure-mode')?.value || 'chat';
       const previewGroup = container.querySelector('#ai-endpoint-preview-group');
       const previewCode = container.querySelector('#ai-endpoint-preview');
-      const azureModeGroup = container.querySelector('#ai-azure-mode-group');
-      if (azureModeGroup) azureModeGroup.style.display = provider === 'azure' ? '' : 'none';
+      const apiModeGroup = container.querySelector('#ai-api-mode-group');
+      const reasoningGroup = container.querySelector('#ai-reasoning-group');
+      const websearchGroup = container.querySelector('#ai-websearch-group');
+      const showResponsesOptions = provider && provider !== 'anthropic' && apiMode !== 'chat';
+      if (apiModeGroup) apiModeGroup.style.display = provider && provider !== 'anthropic' ? '' : 'none';
+      if (reasoningGroup) reasoningGroup.style.display = showResponsesOptions ? '' : 'none';
+      if (websearchGroup) websearchGroup.style.display = showResponsesOptions ? '' : 'none';
       if (!previewGroup || !previewCode) return;
 
       if (!provider || !endpoint) {
         previewGroup.style.display = 'none';
         return;
-      }
-
-      let url;
-      switch (provider) {
-        case 'openai':
-        case 'custom':
-          url = `${endpoint}/chat/completions`;
-          break;
-        case 'azure':
-          url = azureMode === 'responses'
-            ? `${endpoint}/responses?api-version=2025-03-01-preview`
-            : `${endpoint}/chat/completions?api-version=2024-06-01`;
-          break;
-        case 'anthropic':
-          url = `${endpoint}/messages`;
-          break;
-        default:
-          url = endpoint;
       }
 
       let auth;
@@ -945,13 +1073,31 @@ class DataverseToolkit {
           auth = '';
       }
 
-      previewCode.textContent = `POST ${url}\n${auth}`;
+      previewCode.textContent = `POST ${endpoint} ${auth}`;
       previewGroup.style.display = '';
     };
 
     container.querySelector('#setting-ai-provider')?.addEventListener('change', _updateAiPreview);
     container.querySelector('#setting-ai-endpoint')?.addEventListener('input', _updateAiPreview);
-    container.querySelector('#setting-ai-azure-mode')?.addEventListener('change', _updateAiPreview);
+    container.querySelector('#setting-ai-api-mode')?.addEventListener('change', _updateAiPreview);
+
+    // Toggle buttons for reasoning effort
+    const _setupToggle = (containerId, settingKey) => {
+      const el = container.querySelector(`#${containerId}`);
+      if (!el) return;
+      el.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-value]');
+        if (!btn) return;
+        this._settings[settingKey] = btn.dataset.value;
+        el.querySelectorAll('button').forEach(b => {
+          b.style.background = b === btn ? 'var(--color-accent)' : '';
+          b.style.color = b === btn ? 'var(--color-bg)' : '';
+        });
+      });
+    };
+    _setupToggle('setting-ai-reasoning', 'aiReasoning');
+    _setupToggle('setting-ai-websearch', 'aiWebSearch');
+
     _updateAiPreview(); // initial render
 
     container.querySelector('#setting-save')?.addEventListener('click', () => {
@@ -968,7 +1114,8 @@ class DataverseToolkit {
       this._settings.aiEndpoint = container.querySelector('#setting-ai-endpoint')?.value?.replace(/\/+$/, '') || '';
       this._settings.aiApiKey = container.querySelector('#setting-ai-key')?.value || '';
       this._settings.aiModel = container.querySelector('#setting-ai-model')?.value || '';
-      this._settings.aiAzureApiMode = container.querySelector('#setting-ai-azure-mode')?.value || 'chat';
+      this._settings.aiApiMode = container.querySelector('#setting-ai-api-mode')?.value || 'responses';
+      // aiReasoning and aiWebSearch are already set live by toggle buttons
 
       this.cache.setTTL(this._settings.cacheTTL);
       this._saveSettings();
@@ -1131,6 +1278,7 @@ class DataverseToolkit {
     try {
       await chrome.storage.local.set({ [STORAGE_KEY_SETTINGS]: this._settings });
       this._updateQuickChatBar();
+      this._rebuildSidebar();
     } catch {
       // Ignore storage errors
     }
@@ -1142,12 +1290,13 @@ class DataverseToolkit {
 
   _attachKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
-      // Ctrl+1-5: Switch tabs
+      // Ctrl+1-9: Switch tabs (ordered by sidebar groups)
       if (e.ctrlKey && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= TAB_DEFINITIONS.length) {
+        const ordered = this._getOrderedTabIds();
+        if (num >= 1 && num <= Math.min(9, ordered.length)) {
           e.preventDefault();
-          this._switchTab(TAB_DEFINITIONS[num - 1].id);
+          this._switchTab(ordered[num - 1]);
           return;
         }
       }
@@ -1386,46 +1535,136 @@ class DataverseToolkit {
         border-color: var(--dvt-border, #444);
       }
 
-      /* Main area */
+      /* Main area — sidebar + content row */
       .${CSS_PREFIX}-main {
         flex: 1;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         overflow: hidden;
         position: relative;
       }
 
-      /* Tab bar */
-      .${CSS_PREFIX}-tab-bar {
+      /* VS Code-style sidebar */
+      .${CSS_PREFIX}-sidebar {
         display: flex;
-        border-bottom: 1px solid var(--dvt-border, #333);
-        background: var(--dvt-bg, #1e1e1e);
+        flex-direction: column;
+        width: 38px;
+        min-width: 38px;
+        background: var(--dvt-bg-secondary, #252526);
+        border-right: 1px solid var(--dvt-border, #333);
         flex-shrink: 0;
-        overflow-x: auto;
+        overflow: hidden;
+        transition: width 0.18s ease, min-width 0.18s ease;
+        z-index: 20;
       }
-      .${CSS_PREFIX}-tab-btn {
+      .${CSS_PREFIX}-sidebar:hover,
+      .${CSS_PREFIX}-sidebar.pinned {
+        width: 138px;
+        min-width: 138px;
+      }
+      .${CSS_PREFIX}-sidebar-pin {
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 8px 14px;
+        justify-content: center;
+        width: 100%;
+        height: 22px;
+        background: none;
+        border: none;
+        border-bottom: 1px solid var(--dvt-border, #333);
+        color: var(--dvt-muted, #666);
+        font-size: 12px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .${CSS_PREFIX}-sidebar-pin:hover {
+        color: var(--dvt-text, #ccc);
+        background: var(--dvt-hover, #2a2d35);
+      }
+      .${CSS_PREFIX}-sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        height: 34px;
+        padding: 0 0 0 9px;
         border: none;
         background: none;
         color: var(--dvt-muted, #888);
         font-size: 12px;
         cursor: pointer;
-        border-bottom: 2px solid transparent;
-        transition: color 0.15s, border-color 0.15s;
+        border-left: 2px solid transparent;
+        transition: color 0.12s, background 0.12s, border-color 0.12s;
         white-space: nowrap;
+        overflow: hidden;
+        flex-shrink: 0;
       }
-      .${CSS_PREFIX}-tab-btn:hover {
+      .${CSS_PREFIX}-sidebar-item:hover {
         color: var(--dvt-text, #ccc);
+        background: var(--dvt-hover, #2a2d35);
       }
-      .${CSS_PREFIX}-tab-btn.active {
+      .${CSS_PREFIX}-sidebar-item.active {
         color: var(--dvt-text, #ccc);
-        border-bottom-color: var(--dvt-accent, #0078d4);
+        border-left-color: var(--dvt-accent, #0078d4);
+        background: rgba(0,120,212,0.08);
       }
-      .${CSS_PREFIX}-tab-icon {
-        font-size: 14px;
+      .${CSS_PREFIX}-sidebar-item.tertiary {
+        opacity: 0.6;
+      }
+      .${CSS_PREFIX}-sidebar-item.tertiary:hover {
+        opacity: 1;
+      }
+      .${CSS_PREFIX}-sidebar-item.unconfigured {
+        opacity: 0.4;
+      }
+      .${CSS_PREFIX}-sidebar-item.unconfigured::after {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--dvt-warning, #dcdcaa);
+        flex-shrink: 0;
+        margin-left: auto;
+        margin-right: 10px;
+      }
+      .${CSS_PREFIX}-sidebar-item.agent-glow .${CSS_PREFIX}-sidebar-icon {
+        filter: drop-shadow(0 0 4px var(--dvt-accent, #0078d4));
+      }
+      .${CSS_PREFIX}-sidebar-icon {
+        font-size: 16px;
+        width: 20px;
+        text-align: center;
+        flex-shrink: 0;
+        line-height: 1;
+      }
+      .${CSS_PREFIX}-sidebar-label {
+        opacity: 0;
+        transition: opacity 0.12s ease 0.06s;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .${CSS_PREFIX}-sidebar:hover .${CSS_PREFIX}-sidebar-label,
+      .${CSS_PREFIX}-sidebar.pinned .${CSS_PREFIX}-sidebar-label {
+        opacity: 1;
+      }
+      .${CSS_PREFIX}-sidebar-sep {
+        height: 1px;
+        margin: 4px 8px;
+        background: var(--dvt-border, #333);
+        flex-shrink: 0;
+      }
+      .${CSS_PREFIX}-sidebar-spacer {
+        flex: 1;
+      }
+
+      /* Content wrapper */
+      .${CSS_PREFIX}-content-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+        min-width: 0;
       }
 
       /* Tab content */

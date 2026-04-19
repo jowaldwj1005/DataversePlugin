@@ -14,6 +14,9 @@ const STORAGE_KEY = 'dvt-agent-skills';
  * @property {string} name         - Human-readable name
  * @property {string} content      - Markdown content
  * @property {string[]} linkedTools - Tool IDs this skill provides context for
+ * @property {string[]} tags       - Free tags for categorization
+ * @property {string} trigger      - When this skill is relevant (human-readable)
+ * @property {boolean} enabled     - Manual toggle (default: true)
  * @property {number} createdAt
  * @property {number} updatedAt
  */
@@ -58,17 +61,21 @@ export class SkillManager {
    */
   buildSkillPromptSection(activeToolIds) {
     const relevant = this.getAll().filter(s =>
-      !s.linkedTools?.length || s.linkedTools.some(t => activeToolIds.includes(t))
+      s.enabled !== false &&
+      (!s.linkedTools?.length || s.linkedTools.some(t => activeToolIds.includes(t)))
     );
     if (!relevant.length) return '';
 
     return '\n## Skill Context\n' +
-      relevant.map(s => `### ${s.name}\n${s.content}`).join('\n\n');
+      relevant.map(s => {
+        const trigger = s.trigger ? `> Trigger: ${s.trigger}\n\n` : '';
+        return `### ${s.name}\n${trigger}${s.content}`;
+      }).join('\n\n');
   }
 
-  async create(name, content, linkedTools = []) {
+  async create(name, content, { linkedTools = [], tags = [], trigger = '', enabled = true } = {}) {
     const id = `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const skill = { id, name, content, linkedTools, createdAt: Date.now(), updatedAt: Date.now() };
+    const skill = { id, name, content, linkedTools, tags, trigger, enabled, createdAt: Date.now(), updatedAt: Date.now() };
     this.#skills.set(id, skill);
     await this.save();
     return skill;
@@ -93,7 +100,13 @@ export class SkillManager {
   exportAsMarkdown(id) {
     const skill = this.#skills.get(id);
     if (!skill) return null;
-    return `---\nname: ${skill.name}\nlinkedTools: ${(skill.linkedTools || []).join(', ')}\n---\n\n${skill.content}`;
+    const fm = [
+      `name: ${skill.name}`,
+      skill.tags?.length ? `tags: ${skill.tags.join(', ')}` : null,
+      skill.linkedTools?.length ? `linkedTools: ${skill.linkedTools.join(', ')}` : null,
+      skill.trigger ? `trigger: ${skill.trigger}` : null,
+    ].filter(Boolean).join('\n');
+    return `---\n${fm}\n---\n\n${skill.content}`;
   }
 
   /**

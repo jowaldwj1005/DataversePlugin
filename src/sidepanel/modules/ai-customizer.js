@@ -53,6 +53,7 @@ export default class AiCustomizer {
   #entitySelect = null;
   #selectorContainer = null;
   #chatArea = null;
+  #skillDrawer = null;
   #promptTextarea = null;
   #tokenEstimate = null;
   #sendBtn = null;
@@ -61,6 +62,7 @@ export default class AiCustomizer {
   #paletteVisible = false;
   #paletteSelection = 0;
   #paletteItems = [];
+  #responsesBar = null;
 
   constructor(container, apiClient, metadataCache) {
     this.container = container;
@@ -84,10 +86,14 @@ export default class AiCustomizer {
       this.container.innerHTML = `
         <div class="${CSS}-unconfigured">
           <div class="${CSS}-unconfigured-icon">&#10024;</div>
-          <h3>AI Customizer</h3>
-          <p>Configure your AI provider in the <strong>Settings</strong> tab to get started.</p>
+          <h3>Dataverse Agent</h3>
+          <p>Configure your AI provider to get started.</p>
           <p class="${CSS}-unconfigured-hint">Supports OpenAI, Azure OpenAI, Anthropic, or any OpenAI-compatible endpoint.</p>
+          <button class="${CSS}-unconfigured-btn">Open Settings \u2192</button>
         </div>`;
+      this.container.querySelector(`.${CSS}-unconfigured-btn`)?.addEventListener('click', () => {
+        app.switchTab('settings');
+      });
       return;
     }
 
@@ -109,6 +115,7 @@ export default class AiCustomizer {
     // Initialize skill + session managers
     this.#skillManager = new SkillManager();
     await this.#skillManager.load();
+    this.#toolExecutor.setSkillManager(this.#skillManager);
     this.#sessionManager = new SessionManager();
     await this.#sessionManager.load();
 
@@ -125,8 +132,12 @@ export default class AiCustomizer {
           this._addUserMessage(msg.text);
         } else {
           const agentMsg = this._addAgentMessage();
-          agentMsg.statusLine.textContent = msg.text || '';
-          agentMsg.statusLine.style.color = 'var(--color-text-muted)';
+          if (msg.text) {
+            const content = document.createElement('div');
+            content.className = `${CSS}-agent-content`;
+            content.innerHTML = this._renderMarkdown(msg.text);
+            agentMsg.bubble.appendChild(content);
+          }
         }
       }
     }
@@ -251,7 +262,13 @@ export default class AiCustomizer {
       }
     });
 
-    sessionGroup.append(this._sessionSelect, deleteBtn, exportBtn);
+    const skillsBtn = document.createElement('button');
+    skillsBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+    skillsBtn.textContent = '\uD83D\uDCDA';
+    skillsBtn.title = 'Skills';
+    skillsBtn.addEventListener('click', () => this._toggleSkillDrawer());
+
+    sessionGroup.append(this._sessionSelect, deleteBtn, exportBtn, skillsBtn);
 
     // Collapsible Context section (Entity, Type, View)
     const contextWrap = document.createElement('details');
@@ -354,7 +371,275 @@ export default class AiCustomizer {
   _buildChatArea() {
     this.#chatArea = document.createElement('div');
     this.#chatArea.className = `${CSS}-chat-area`;
+
+    // Skill drawer (sibling to chat, positioned relative to container)
+    this.#skillDrawer = document.createElement('div');
+    this.#skillDrawer.className = `${CSS}-skill-drawer`;
+
     this.container.appendChild(this.#chatArea);
+    this.container.appendChild(this.#skillDrawer);
+  }
+
+  // -----------------------------------------------------------------------
+  // Skill Drawer
+  // -----------------------------------------------------------------------
+
+  async _seedDefaultSkills() {
+    if (this.#skillManager.getAll().length > 0) return; // already has skills
+    // Show empty drawer first, then animate the skill in
+    this._renderSkillDrawer();
+    await new Promise(r => setTimeout(r, 600));
+    await this.#skillManager.create(
+      'Dataverse custom table creation via Web API',
+      `Use the Dataverse Web API metadata endpoint to create custom tables by sending a POST request to \`EntityDefinitions\` with a full metadata payload. Do not use a \`CreateEntity\` action for this scenario.
+
+**Key points:**
+- **Endpoint:** \`POST EntityDefinitions\`
+- Include required metadata:
+  - \`SchemaName\`, \`DisplayName\` (Label), \`DisplayCollectionName\` (Label)
+  - \`OwnershipType\` (typically \`UserOwned\` or \`OrganizationOwned\`)
+  - \`Attributes\` containing a \`StringAttributeMetadata\` entry for the primary name column
+- The primary name attribute must be in \`Attributes\` with \`IsPrimaryName = true\`
+- Use a valid customization prefix in schema names, e.g. \`new_testchromplugin\` (no hyphens)
+- A successful create may return \`204 No Content\`
+- After creating, publish the entity so it becomes visible
+
+**Common pitfalls:**
+- Missing primary name attribute causes creation failure
+- Putting \`PrimaryAttribute\` directly on the entity payload is not valid for this Web API pattern
+- Calling \`CreateEntity\` as a Web API action may fail — it is not the correct route
+
+**Follow-up:** Run \`publish_entity\` after successful creation.`,
+      {
+        tags: ['dataverse', 'webapi', 'metadata', 'entity', 'table-creation'],
+        trigger: 'When creating a custom Dataverse table/entity via API or troubleshooting EntityDefinitions metadata requests',
+        linkedTools: ['execute_action'],
+      }
+    );
+    // Re-render to show the new skill, then Clippy
+    this._renderSkillDrawer();
+    import('./easter-eggs.js').then(ee => ee.forceShowClippy(
+      'Ich hab dir mal nen ersten Skill kreiert,\ndamit du so tun kannst als könntest du\nDatenmodelle entwerfen. 📎✨'
+    )).catch(() => {});
+  }
+
+  async _toggleSkillDrawer() {
+    if (!this.#skillDrawer) return;
+    const isOpen = this.#skillDrawer.classList.toggle('open');
+    if (isOpen) {
+      await this._seedDefaultSkills();
+      this._renderSkillDrawer();
+    }
+  }
+
+  _renderSkillDrawer() {
+    const drawer = this.#skillDrawer;
+    drawer.innerHTML = '';
+
+    const skills = this.#skillManager.getAll();
+
+    // Header
+    const header = document.createElement('div');
+    header.className = `${CSS}-skill-drawer-header`;
+    const h3 = document.createElement('h3');
+    h3.textContent = `Skills (${skills.length})`;
+    const actions = document.createElement('div');
+    actions.className = `${CSS}-skill-drawer-actions`;
+    const addBtn = document.createElement('button');
+    addBtn.textContent = '+';
+    addBtn.title = 'New skill';
+    addBtn.addEventListener('click', () => this._showSkillForm());
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u00D7';
+    closeBtn.addEventListener('click', () => this.#skillDrawer.classList.remove('open'));
+    actions.append(addBtn, closeBtn);
+    header.append(h3, actions);
+    drawer.appendChild(header);
+
+    // Tag filter bar
+    const allTags = [...new Set(skills.flatMap(s => s.tags || []))].sort();
+    if (allTags.length) {
+      const tagBar = document.createElement('div');
+      tagBar.className = `${CSS}-skill-tags-bar`;
+      const allChip = document.createElement('button');
+      allChip.className = `${CSS}-skill-tag-chip active`;
+      allChip.textContent = 'all';
+      allChip.addEventListener('click', () => {
+        this._skillTagFilter = null;
+        this._renderSkillDrawer();
+      });
+      tagBar.appendChild(allChip);
+      for (const tag of allTags) {
+        const chip = document.createElement('button');
+        chip.className = `${CSS}-skill-tag-chip${this._skillTagFilter === tag ? ' active' : ''}`;
+        chip.textContent = tag;
+        chip.addEventListener('click', () => {
+          this._skillTagFilter = this._skillTagFilter === tag ? null : tag;
+          this._renderSkillDrawer();
+        });
+        tagBar.appendChild(chip);
+      }
+      if (!this._skillTagFilter) allChip.classList.add('active');
+      else allChip.classList.remove('active');
+      drawer.appendChild(tagBar);
+    }
+
+    // Skill list
+    const list = document.createElement('div');
+    list.className = `${CSS}-skill-list`;
+
+    const filtered = this._skillTagFilter
+      ? skills.filter(s => s.tags?.includes(this._skillTagFilter))
+      : skills;
+
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.className = `${CSS}-skill-empty`;
+      empty.textContent = skills.length ? 'No skills match this tag.' : 'No skills yet. Click + to create one, or ask the agent to save knowledge as a skill.';
+      list.appendChild(empty);
+    }
+
+    for (const skill of filtered) {
+      list.appendChild(this._buildSkillCard(skill));
+    }
+
+    drawer.appendChild(list);
+  }
+
+  _buildSkillCard(skill) {
+    const card = document.createElement('div');
+    card.className = `${CSS}-skill-card`;
+
+    // Header row
+    const header = document.createElement('div');
+    header.className = `${CSS}-skill-card-header`;
+
+    const toggle = document.createElement('button');
+    toggle.className = `${CSS}-skill-card-toggle${skill.enabled !== false ? ' on' : ''}`;
+    toggle.title = skill.enabled !== false ? 'Enabled' : 'Disabled';
+    toggle.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await this.#skillManager.update(skill.id, { enabled: skill.enabled === false });
+      this._renderSkillDrawer();
+    });
+
+    const name = document.createElement('span');
+    name.className = `${CSS}-skill-card-name`;
+    name.textContent = skill.name;
+
+    header.append(toggle, name);
+    header.addEventListener('click', () => {
+      const body = card.querySelector(`.${CSS}-skill-card-body`);
+      if (body) {
+        const opening = !body.classList.contains('open');
+        body.classList.toggle('open');
+        if (opening && skill.name === 'Dataverse custom table creation via Web API') {
+          import('./easter-eggs.js').then(ee => ee.forceShowClippy(
+            'Ah, der Klassiker! EntityDefinitions POST —\ndamit fing alles an. Ohne mich wärst du\nnoch bei PrimaryAttribute. 📎'
+          )).catch(() => {});
+        }
+      }
+    });
+
+    card.appendChild(header);
+
+    // Tags
+    if (skill.tags?.length) {
+      const meta = document.createElement('div');
+      meta.className = `${CSS}-skill-card-meta`;
+      for (const tag of skill.tags) {
+        const t = document.createElement('span');
+        t.className = `${CSS}-skill-card-meta-tag`;
+        t.textContent = tag;
+        meta.appendChild(t);
+      }
+      card.appendChild(meta);
+    }
+
+    // Trigger
+    if (skill.trigger) {
+      const trig = document.createElement('div');
+      trig.className = `${CSS}-skill-card-trigger`;
+      trig.textContent = skill.trigger;
+      card.appendChild(trig);
+    }
+
+    // Expandable body
+    const body = document.createElement('div');
+    body.className = `${CSS}-skill-card-body`;
+
+    const content = document.createElement('div');
+    content.innerHTML = this._renderMarkdown(skill.content);
+    body.appendChild(content);
+
+    const bodyActions = document.createElement('div');
+    bodyActions.className = `${CSS}-skill-card-body-actions`;
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => this._showSkillForm(skill));
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.className = 'danger';
+    deleteBtn.addEventListener('click', async () => {
+      await this.#skillManager.delete(skill.id);
+      this._renderSkillDrawer();
+    });
+    bodyActions.append(editBtn, deleteBtn);
+    body.appendChild(bodyActions);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  _showSkillForm(existingSkill = null) {
+    // Remove any existing form
+    this.#skillDrawer.querySelector(`.${CSS}-skill-form`)?.remove();
+
+    const form = document.createElement('div');
+    form.className = `${CSS}-skill-form`;
+
+    form.innerHTML = `
+      <label>Name</label>
+      <input type="text" id="skill-name" value="${existingSkill?.name || ''}" placeholder="e.g. EntityDefinitions POST" />
+      <label>Tags (comma-separated)</label>
+      <input type="text" id="skill-tags" value="${(existingSkill?.tags || []).join(', ')}" placeholder="e.g. api, metadata" />
+      <label>Trigger (when is this relevant?)</label>
+      <input type="text" id="skill-trigger" value="${existingSkill?.trigger || ''}" placeholder="e.g. When creating tables via Web API" />
+      <label>Content (Markdown)</label>
+      <textarea id="skill-content" placeholder="Knowledge to persist...">${existingSkill?.content || ''}</textarea>
+    `;
+
+    const actions = document.createElement('div');
+    actions.className = `${CSS}-skill-form-actions`;
+    const saveBtn = document.createElement('button');
+    saveBtn.className = `${CSS}-btn-primary`;
+    saveBtn.textContent = existingSkill ? 'Update' : 'Create';
+    saveBtn.style.cssText = 'font-size:0.72rem;padding:4px 12px;';
+    saveBtn.addEventListener('click', async () => {
+      const name = form.querySelector('#skill-name').value.trim();
+      const content = form.querySelector('#skill-content').value.trim();
+      if (!name || !content) return;
+      const tags = form.querySelector('#skill-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+      const trigger = form.querySelector('#skill-trigger').value.trim();
+
+      if (existingSkill) {
+        await this.#skillManager.update(existingSkill.id, { name, content, tags, trigger });
+      } else {
+        await this.#skillManager.create(name, content, { tags, trigger });
+      }
+      form.remove();
+      this._renderSkillDrawer();
+    });
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = `${CSS}-btn-secondary`;
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'font-size:0.72rem;padding:4px 12px;';
+    cancelBtn.addEventListener('click', () => form.remove());
+    actions.append(saveBtn, cancelBtn);
+    form.appendChild(actions);
+
+    this.#skillDrawer.appendChild(form);
+    form.querySelector('#skill-name').focus();
   }
 
   _addUserMessage(text) {
@@ -475,13 +760,80 @@ export default class AiCustomizer {
     this.#tokenEstimate.className = `${CSS}-token-estimate`;
 
     controls.append(this.#sendBtn, cmdBtn, sysPromptBtn, this.#tokenEstimate);
-    bar.append(this.#promptTextarea, controls);
+
+    // Responses API inline settings (reasoning + web search)
+    this.#responsesBar = this._buildResponsesBar();
+    bar.append(this.#promptTextarea, this.#responsesBar, controls);
     this.container.appendChild(bar);
   }
 
   _updateTokenEstimate() {
     const text = this.#promptTextarea?.value || '';
     this.#tokenEstimate.textContent = text.trim() ? `~${estimateTokens(text)} tokens` : '';
+  }
+
+  // ---- Responses API inline toggles (reasoning + web search) ---------------
+
+  _buildResponsesBar() {
+    const bar = document.createElement('div');
+    bar.className = `${CSS}-responses-bar`;
+
+    const show = this.#settings.aiProvider
+      && this.#settings.aiProvider !== 'anthropic'
+      && this.#settings.aiApiMode !== 'chat';
+    bar.style.display = show ? '' : 'none';
+
+    const makeToggle = (label, options, settingKey) => {
+      const group = document.createElement('div');
+      group.className = `${CSS}-responses-group`;
+      const lbl = document.createElement('span');
+      lbl.className = `${CSS}-responses-label`;
+      lbl.textContent = label;
+      group.appendChild(lbl);
+
+      for (const { value, text } of options) {
+        const btn = document.createElement('button');
+        btn.className = `${CSS}-responses-opt`;
+        btn.textContent = text;
+        btn.dataset.value = value;
+        if ((this.#settings[settingKey] || '') === value) btn.classList.add('active');
+        btn.addEventListener('click', () => {
+          this.#settings[settingKey] = value;
+          group.querySelectorAll(`.${CSS}-responses-opt`).forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          chrome.storage.local.get('dvt-settings', (r) => {
+            const s = r['dvt-settings'] || {};
+            s[settingKey] = value;
+            chrome.storage.local.set({ 'dvt-settings': s });
+          });
+        });
+        group.appendChild(btn);
+      }
+      return group;
+    };
+
+    bar.appendChild(makeToggle('Reasoning', [
+      { value: '', text: 'off' },
+      { value: 'low', text: 'low' },
+      { value: 'medium', text: 'med' },
+      { value: 'high', text: 'high' },
+    ], 'aiReasoning'));
+
+    bar.appendChild(makeToggle('Web Search', [
+      { value: '', text: 'off' },
+      { value: 'auto', text: 'auto' },
+      { value: 'required', text: 'required' },
+    ], 'aiWebSearch'));
+
+    return bar;
+  }
+
+  _refreshResponsesBar() {
+    if (!this.#responsesBar) return;
+    const show = this.#settings.aiProvider
+      && this.#settings.aiProvider !== 'anthropic'
+      && this.#settings.aiApiMode !== 'chat';
+    this.#responsesBar.style.display = show ? '' : 'none';
   }
 
   // =========================================================================
@@ -623,17 +975,9 @@ export default class AiCustomizer {
   }
 
   _cmdSkills() {
-    // TODO: Phase 5 — open skill drawer
-    const skills = this.#skillManager.getAll();
-    if (!skills.length) {
-      this._addSystemMessage('No skills configured yet. Skills will be available in a future update.');
-      return;
+    if (!this.#skillDrawer.classList.contains('open')) {
+      this._toggleSkillDrawer();
     }
-    let md = '**Skills:**\n\n';
-    for (const s of skills) {
-      md += `- **${s.name}** — linked to: ${s.linkedTools?.join(', ') || '(none)'}\n`;
-    }
-    this._addSystemMessage(md);
   }
 
   _cmdSaveTool() {
@@ -831,6 +1175,12 @@ export default class AiCustomizer {
     const timeline = new AgentTimeline(agentMsg.timelineEl);
     timeline.onAnswer = (answer) => this.#runner?.continueWithAnswer(answer);
 
+    // Build conversation history from session (prior turns only, not the current message)
+    const priorHistory = this.#sessionManager.getHistory().slice(0, -1) // exclude the message we just added
+      .map(msg => ({ role: msg.type === 'user' ? 'user' : 'assistant', content: msg.text }))
+      .filter(m => m.content);
+    const isNewSession = priorHistory.length === 0;
+
     // Build system prompt: base context + tool list + optional override
     let systemPrompt;
     if (this.#systemPromptOverride) {
@@ -849,16 +1199,27 @@ export default class AiCustomizer {
         `{ "status": "error", "error": "...", "reasoning": "..." }`,
         ``,
         `CRITICAL: The "reasoning" field is your MAIN output to the user. Write your complete answer there using Markdown.`,
-        `IMPORTANT: On the FIRST message of a new conversation, call the "name_conversation" tool with a short 2-5 word name based on what the user is asking about. Do this BEFORE answering.`,
         `For "done" status: "reasoning" IS your answer. Do NOT put your answer in "result" — put structured data there only if needed (e.g. generated XML).`,
         `Do NOT wrap JSON in code fences. Return raw JSON only.`,
+        `Only call "inspect_form" when the user explicitly asks about a form or record they have open. Do NOT call it proactively.`,
+        `If a tool call fails, recover gracefully — tell the user what happened and offer alternatives.`,
+        `You can create skills — reusable knowledge that persists across conversations. When you learn something new and non-obvious (API patterns, correct request formats, workarounds), offer to save it as a skill.`,
+        `Prefer "execute_action" for sending requests directly instead of "load_request" (which navigates away from chat). Only use navigation tools when the user needs to SEE a visual artifact.`,
+      ];
+      const excludeTools = new Set();
+      if (isNewSession) {
+        contextParts.push(`On your FIRST response, call "name_conversation" with a short 2-5 word name based on the user's question. Only call it once — never again in this conversation.`);
+      } else {
+        excludeTools.add('name_conversation');
+      }
+      contextParts.push(
         '',
-        this.#toolRegistry.buildToolListForPrompt(),
+        this.#toolRegistry.buildToolListForPrompt(excludeTools),
         '',
         `## Current Context`,
         `Entity: ${this.#selectedEntity?.LogicalName || '(none)'}`,
         `EntitySet: ${this.#selectedEntity?.EntitySetName || ''}`,
-      ];
+      );
       if (currentState.viewName) {
         contextParts.push(`View: "${currentState.viewName}"`);
         contextParts.push(`Current layoutxml: ${currentState.layoutxml || '(none)'}`);
@@ -885,7 +1246,7 @@ export default class AiCustomizer {
           onLog: (tag, summary, detail) => this._log(tag, summary, detail),
         });
 
-      const result = await this.#runner.run(systemPrompt, userPrompt);
+      const result = await this.#runner.run(systemPrompt, userPrompt, priorHistory);
       this.#runner = null;
       this.#sendBtn.textContent = 'Send';
 

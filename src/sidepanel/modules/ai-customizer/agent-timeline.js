@@ -122,6 +122,60 @@ export class AgentTimeline {
       el.appendChild(details);
     }
 
+    // Responses API metadata (reasoning summaries, web search calls, citations)
+    if (step.responsesMetadata?.length && step.type === 'thinking') {
+      const metaWrap = document.createElement('details');
+      metaWrap.className = `${CSS}-timeline-responses-meta`;
+
+      const hasSummaries = step.responsesMetadata.some(m => m.type === 'reasoning' && m.summary?.length);
+      const searchCount = step.responsesMetadata.filter(m => m.type === 'web_search').length;
+      const citationCount = step.responsesMetadata.filter(m => m.type === 'citation').length;
+
+      const parts = [];
+      if (hasSummaries) parts.push('reasoning');
+      if (searchCount) parts.push(`${searchCount} search${searchCount > 1 ? 'es' : ''}`);
+      if (citationCount) parts.push(`${citationCount} citation${citationCount > 1 ? 's' : ''}`);
+
+      const sum = document.createElement('summary');
+      sum.textContent = parts.join(', ') || 'API details';
+      metaWrap.appendChild(sum);
+
+      const inner = document.createElement('div');
+      inner.className = `${CSS}-timeline-responses-inner`;
+
+      for (const item of step.responsesMetadata) {
+        if (item.type === 'reasoning' && item.summary?.length) {
+          for (const s of item.summary) {
+            const line = document.createElement('div');
+            line.className = `${CSS}-timeline-responses-reasoning`;
+            line.textContent = typeof s === 'string' ? s : (s.text || JSON.stringify(s));
+            inner.appendChild(line);
+          }
+        } else if (item.type === 'web_search') {
+          const line = document.createElement('div');
+          line.className = `${CSS}-timeline-responses-search`;
+          if (item.queries?.length) {
+            line.innerHTML = `<span class="${CSS}-responses-search-icon">\u{1F50D}</span> ` +
+              item.queries.map(q => this.#escapeHtml(q)).join('<br>');
+          } else if (item.url) {
+            const short = item.url.length > 80 ? item.url.slice(0, 77) + '...' : item.url;
+            line.innerHTML = `<span class="${CSS}-responses-search-icon">\u{1F310}</span> <a href="${this.#escapeHtml(item.url)}" target="_blank" rel="noopener">${this.#escapeHtml(short)}</a>`;
+          }
+          inner.appendChild(line);
+        } else if (item.type === 'citation') {
+          const line = document.createElement('div');
+          line.className = `${CSS}-timeline-responses-citation`;
+          const title = item.title || item.url;
+          const short = title.length > 80 ? title.slice(0, 77) + '...' : title;
+          line.innerHTML = `<span class="${CSS}-responses-search-icon">\u{1F4CE}</span> <a href="${this.#escapeHtml(item.url)}" target="_blank" rel="noopener">${this.#escapeHtml(short)}</a>`;
+          inner.appendChild(line);
+        }
+      }
+
+      metaWrap.appendChild(inner);
+      el.appendChild(metaWrap);
+    }
+
     // Reasoning (only for thinking steps, not duplicated in final content)
     if (step.reasoning && step.type === 'thinking') {
       const reasoning = document.createElement('div');

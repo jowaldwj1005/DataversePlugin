@@ -64,11 +64,13 @@ export class ToolRegistry {
 
   /**
    * Generate the tool list section for the system prompt.
+   * @param {Set<string>} [excludeIds] - Tool IDs to omit from the prompt
    */
-  buildToolListForPrompt() {
+  buildToolListForPrompt(excludeIds) {
     const lines = ['## Available Tools', 'Call tools by responding with: { "status": "tool_call", "tool": "<tool_id>", "params": {...}, "reasoning": "..." }', ''];
 
     for (const tool of this.getAll()) {
+      if (excludeIds?.has(tool.id)) continue;
       const confirm = tool.requiresConfirmation ? ' (requires user confirmation)' : '';
       lines.push(`### ${tool.id}${confirm}`);
       lines.push(tool.description);
@@ -367,14 +369,14 @@ export function registerBuiltinTools(registry) {
   registry.registerBuiltin({
     id: 'execute_action',
     name: 'Execute Action',
-    description: 'Call a Dataverse bound or unbound action/function.',
+    description: 'Send any HTTP request to the Dataverse Web API. Use for actions, functions, metadata operations (e.g. POST EntityDefinitions), or any endpoint not covered by other tools.',
     category: 'customization',
     requiresConfirmation: true,
     autoApprovable: true,
     params: {
-      method: { type: 'string', required: true, description: 'HTTP method: GET for functions, POST for actions' },
-      url: { type: 'string', required: true, description: 'Relative URL (e.g. "WhoAmI()" or "accounts(id)/Microsoft.Dynamics.CRM.MyAction")' },
-      body: { type: 'object', description: 'Request body for POST actions' },
+      method: { type: 'string', required: true, description: 'HTTP method: GET, POST, PATCH, PUT, DELETE' },
+      url: { type: 'string', required: true, description: 'Relative URL (e.g. "WhoAmI()", "EntityDefinitions", "accounts(id)/Microsoft.Dynamics.CRM.MyAction")' },
+      body: { type: 'object', description: 'Request body for POST/PATCH/PUT' },
     },
     skillFiles: [],
     handler: async (params, ctx) => {
@@ -585,6 +587,89 @@ export function registerBuiltinTools(registry) {
         format: params.format || 'claude',
         mode: params.mode || 'create',
       });
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Skill management tools
+  // ---------------------------------------------------------------------------
+
+  registry.registerBuiltin({
+    id: 'list_skills',
+    name: 'List Skills',
+    description: 'List all saved skills. Optionally filter by tag.',
+    category: 'other',
+    requiresConfirmation: false,
+    autoApprovable: false,
+    params: {
+      tag: { type: 'string', description: 'Optional tag to filter by' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.skillManager) return { error: 'Skill manager not available' };
+      let skills = ctx.skillManager.getAll();
+      if (params.tag) {
+        skills = skills.filter(s => s.tags?.includes(params.tag));
+      }
+      return skills.map(s => ({
+        id: s.id,
+        name: s.name,
+        tags: s.tags || [],
+        trigger: s.trigger || '',
+        enabled: s.enabled !== false,
+        linkedTools: s.linkedTools || [],
+      }));
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'create_skill',
+    name: 'Create Skill',
+    description: 'Save a new reusable skill — a knowledge document that persists across conversations and is injected into your context. Use this when you learn something new and non-obvious (API patterns, correct request formats, troubleshooting steps).',
+    category: 'other',
+    requiresConfirmation: true,
+    autoApprovable: true,
+    params: {
+      name: { type: 'string', required: true, description: 'Short descriptive name' },
+      content: { type: 'string', required: true, description: 'Markdown content — the knowledge to persist' },
+      tags: { type: 'array', description: 'Free tags for categorization (e.g. ["api", "metadata"])' },
+      trigger: { type: 'string', description: 'When this skill is relevant (e.g. "When creating entities via Web API")' },
+      linkedTools: { type: 'array', description: 'Tool IDs this skill provides context for (e.g. ["execute_action"])' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.skillManager) return { error: 'Skill manager not available' };
+      const skill = await ctx.skillManager.create(params.name, params.content, {
+        tags: params.tags || [],
+        trigger: params.trigger || '',
+        linkedTools: params.linkedTools || [],
+      });
+      return { created: skill.id, name: skill.name, tags: skill.tags };
+    },
+  });
+
+  registry.registerBuiltin({
+    id: 'update_skill',
+    name: 'Update Skill',
+    description: 'Update an existing skill. Use list_skills first to find the skill ID.',
+    category: 'other',
+    requiresConfirmation: true,
+    autoApprovable: true,
+    params: {
+      id: { type: 'string', required: true, description: 'Skill ID' },
+      name: { type: 'string', description: 'New name' },
+      content: { type: 'string', description: 'New Markdown content' },
+      tags: { type: 'array', description: 'New tags' },
+      trigger: { type: 'string', description: 'New trigger description' },
+      linkedTools: { type: 'array', description: 'New linked tool IDs' },
+    },
+    skillFiles: [],
+    handler: async (params, ctx) => {
+      if (!ctx.skillManager) return { error: 'Skill manager not available' };
+      const { id, ...updates } = params;
+      const skill = await ctx.skillManager.update(id, updates);
+      if (!skill) return { error: `Skill ${id} not found` };
+      return { updated: skill.id, name: skill.name };
     },
   });
 }

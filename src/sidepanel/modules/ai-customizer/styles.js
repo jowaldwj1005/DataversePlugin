@@ -19,6 +19,7 @@ export function injectStyles() {
       height: 100%;
       gap: 0;
       overflow: hidden;
+      position: relative;
     }
 
     /* Unconfigured state */
@@ -37,6 +38,21 @@ export function injectStyles() {
     .${CSS}-unconfigured h3 { color: var(--color-text-bright); margin: 0; }
     .${CSS}-unconfigured p { margin: 4px 0; font-size: 0.85rem; }
     .${CSS}-unconfigured-hint { font-size: 0.75rem; opacity: 0.7; }
+    .${CSS}-unconfigured-btn {
+      margin-top: 12px;
+      padding: 8px 20px;
+      border: none;
+      border-radius: 4px;
+      background: var(--dvt-accent, #0078d4);
+      color: #fff;
+      font-size: 0.85rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .${CSS}-unconfigured-btn:hover {
+      background: var(--dvt-accent-hover, #106ebe);
+    }
 
     /* Toolbar */
     .${CSS}-toolbar {
@@ -328,6 +344,44 @@ export function injectStyles() {
       margin-left: auto;
     }
 
+    /* Responses API inline toggles */
+    .${CSS}-responses-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 4px;
+      padding: 2px 0;
+    }
+    .${CSS}-responses-group {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .${CSS}-responses-label {
+      font-size: 0.68rem;
+      color: var(--color-text-muted);
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .${CSS}-responses-opt {
+      padding: 1px 6px;
+      font-size: 0.66rem;
+      border: 1px solid var(--color-border);
+      background: transparent;
+      color: var(--color-text-secondary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .${CSS}-responses-opt:hover {
+      background: var(--color-bg-hover);
+    }
+    .${CSS}-responses-opt.active {
+      background: var(--color-accent);
+      color: var(--color-bg);
+      border-color: var(--color-accent);
+    }
+
     /* Buttons */
     .${CSS}-btn {
       padding: 4px 10px;
@@ -479,6 +533,50 @@ export function injectStyles() {
       white-space: pre-wrap;
       word-break: break-all;
       color: var(--color-text-muted);
+    }
+
+    /* Responses API metadata (reasoning, web search, citations) */
+    .${CSS}-timeline-responses-meta {
+      width: 100%;
+      padding-left: 24px;
+      margin-top: 2px;
+    }
+    .${CSS}-timeline-responses-meta summary {
+      font-size: 0.68rem;
+      color: var(--color-accent-secondary, var(--color-text-muted));
+      cursor: pointer;
+      user-select: none;
+    }
+    .${CSS}-timeline-responses-meta summary:hover { color: var(--color-text-primary); }
+    .${CSS}-timeline-responses-inner {
+      padding: 4px 0 2px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .${CSS}-timeline-responses-reasoning {
+      font-size: 0.7rem;
+      color: var(--color-text-muted);
+      line-height: 1.4;
+      font-style: italic;
+    }
+    .${CSS}-timeline-responses-search,
+    .${CSS}-timeline-responses-citation {
+      font-size: 0.68rem;
+      color: var(--color-text-secondary);
+      line-height: 1.4;
+    }
+    .${CSS}-timeline-responses-search a,
+    .${CSS}-timeline-responses-citation a {
+      color: var(--color-accent-secondary, var(--color-accent));
+      text-decoration: none;
+    }
+    .${CSS}-timeline-responses-search a:hover,
+    .${CSS}-timeline-responses-citation a:hover {
+      text-decoration: underline;
+    }
+    .${CSS}-responses-search-icon {
+      font-size: 0.62rem;
     }
 
     /* ================================================================
@@ -799,6 +897,262 @@ export function injectStyles() {
       overflow-y: auto;
       background: var(--color-bg-panel);
       border-left: 2px solid var(--color-border-subtle);
+    }
+
+    /* ================================================================
+       Skill Drawer
+       ================================================================ */
+    .${CSS}-skill-drawer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 300px;
+      height: 100%;
+      background: var(--color-bg-base);
+      border-right: 1px solid var(--color-border-subtle);
+      box-shadow: 4px 0 12px rgba(0,0,0,0.3);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+      overflow: hidden;
+    }
+    .${CSS}-skill-drawer.open { transform: translateX(0); }
+
+    .${CSS}-skill-drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-subtle);
+      flex-shrink: 0;
+    }
+    .${CSS}-skill-drawer-header h3 {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--color-text-bright);
+    }
+    .${CSS}-skill-drawer-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .${CSS}-skill-drawer-actions button {
+      background: none;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 2px 4px;
+      border-radius: var(--radius-sm);
+    }
+    .${CSS}-skill-drawer-actions button:hover {
+      color: var(--color-text-bright);
+      background: var(--color-bg-hover);
+    }
+
+    .${CSS}-skill-tags-bar {
+      display: flex;
+      gap: 4px;
+      padding: 6px 10px;
+      overflow-x: auto;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--color-border-subtle);
+    }
+    .${CSS}-skill-tag-chip {
+      padding: 2px 8px;
+      font-size: 0.65rem;
+      border-radius: 10px;
+      border: 1px solid var(--color-border-subtle);
+      background: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .${CSS}-skill-tag-chip:hover { border-color: var(--color-text-muted); }
+    .${CSS}-skill-tag-chip.active {
+      background: var(--color-accent);
+      color: var(--color-bg);
+      border-color: var(--color-accent);
+    }
+
+    .${CSS}-skill-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .${CSS}-skill-empty {
+      color: var(--color-text-muted);
+      text-align: center;
+      padding: 32px 16px;
+      font-size: 0.78rem;
+      line-height: 1.5;
+    }
+
+    .${CSS}-skill-card {
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+      overflow: hidden;
+      background: var(--color-bg-panel);
+    }
+    .${CSS}-skill-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .${CSS}-skill-card-header:hover { background: var(--color-bg-hover); }
+    .${CSS}-skill-card-name {
+      flex: 1;
+      font-weight: 500;
+      color: var(--color-text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${CSS}-skill-card-toggle {
+      position: relative;
+      width: 28px;
+      height: 16px;
+      border-radius: 8px;
+      background: var(--color-border-subtle);
+      border: none;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .${CSS}-skill-card-toggle.on { background: var(--color-accent); }
+    .${CSS}-skill-card-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: white;
+      transition: left 0.15s;
+    }
+    .${CSS}-skill-card-toggle.on::after { left: 14px; }
+
+    .${CSS}-skill-card-meta {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      padding: 2px 10px 6px;
+    }
+    .${CSS}-skill-card-meta-tag {
+      font-size: 0.62rem;
+      padding: 2px 6px;
+      border-radius: 8px;
+      background: var(--color-bg-hover);
+      color: var(--color-text-muted);
+      border: 1px solid var(--color-border-subtle);
+    }
+    .${CSS}-skill-card-trigger {
+      padding: 2px 10px 6px;
+      font-size: 0.68rem;
+      color: var(--color-text-muted);
+      font-style: italic;
+      line-height: 1.3;
+    }
+
+    .${CSS}-skill-card-body {
+      display: none;
+      padding: 8px 10px;
+      border-top: 1px solid var(--color-border-subtle);
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: var(--color-text-secondary);
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .${CSS}-skill-card-body.open { display: block; }
+    .${CSS}-skill-card-body code {
+      background: var(--color-bg-input);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 0.7rem;
+    }
+    .${CSS}-skill-card-body pre {
+      margin: 6px 0;
+      padding: 8px;
+      background: var(--color-bg-input);
+      border-radius: var(--radius-sm);
+      font-size: 0.68rem;
+      overflow-x: auto;
+      line-height: 1.4;
+    }
+    .${CSS}-skill-card-body strong {
+      color: var(--color-text-bright);
+    }
+    .${CSS}-skill-card-body-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--color-border-subtle);
+    }
+    .${CSS}-skill-card-body-actions button {
+      font-size: 0.7rem;
+      padding: 3px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--color-border-subtle);
+      background: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+    }
+    .${CSS}-skill-card-body-actions button:hover {
+      color: var(--color-text-bright);
+      border-color: var(--color-text-muted);
+    }
+    .${CSS}-skill-card-body-actions button.danger:hover {
+      color: var(--color-error);
+      border-color: var(--color-error);
+    }
+
+    /* Skill edit form */
+    .${CSS}-skill-form {
+      padding: 10px;
+      border-top: 1px solid var(--color-border-subtle);
+      flex-shrink: 0;
+      max-height: 55%;
+      overflow-y: auto;
+      background: var(--color-bg-panel);
+    }
+    .${CSS}-skill-form label {
+      display: block;
+      font-size: 0.68rem;
+      color: var(--color-text-muted);
+      margin-bottom: 2px;
+      margin-top: 6px;
+    }
+    .${CSS}-skill-form label:first-child { margin-top: 0; }
+    .${CSS}-skill-form input,
+    .${CSS}-skill-form textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px 6px;
+      font-size: 0.72rem;
+      background: var(--color-bg-input);
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--color-text-primary);
+      font-family: inherit;
+    }
+    .${CSS}-skill-form textarea {
+      min-height: 80px;
+      resize: vertical;
+      font-family: monospace;
+    }
+    .${CSS}-skill-form-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 8px;
     }
   `;
   document.head.appendChild(style);

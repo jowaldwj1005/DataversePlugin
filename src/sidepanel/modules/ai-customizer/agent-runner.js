@@ -6,7 +6,47 @@
  * and produce final results.
  */
 
-import { buildAiRequest, extractAiResponse, estimateTokens, isAzureResponses } from './provider-adapters.js';
+import { buildAiRequest, extractAiResponse, estimateTokens, isResponsesApi } from './provider-adapters.js';
+
+/**
+ * Attempt to repair malformed JSON from LLM output.
+ * Handles: unclosed braces/brackets, trailing commas, truncated strings.
+ * Only called when JSON.parse() already failed — never on valid JSON.
+ */
+function repairJson(text) {
+  let s = text;
+  // Track state: are we inside a string?
+  let inString = false;
+  let escape = false;
+  const stack = []; // track open braces/brackets
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (stack.length && stack[stack.length - 1] === ch) stack.pop();
+    }
+  }
+
+  // Close unclosed string
+  if (inString) s += '"';
+
+  // Remove trailing commas before we append closers
+  s = s.replace(/,\s*$/m, '');
+
+  // Append missing closers in reverse order
+  while (stack.length) s += stack.pop();
+
+  // Fix trailing commas before } or ] (can appear mid-JSON too)
+  s = s.replace(/,\s*([}\]])/g, '$1');
+
+  return s;
+}
 
 let stepCounter = 0;
 
@@ -24,7 +64,6 @@ export class AgentRunner {
   // Conversation state
   #systemPrompt = '';
   #messages = [];
-  #responseId = null;  // Azure Responses API: tracks previous_response_id for multi-turn
   #resolveQuestion = null;
   #resolveConfirmation = null;
 
@@ -54,17 +93,19 @@ export class AgentRunner {
    * Run the agent loop.
    * @param {string} systemPrompt  Full system prompt (with tool list, skills, context)
    * @param {string} userPrompt    User's message
+   * @param {Array<{role: string, content: string}>} [history]  Prior conversation turns
    * @returns {Promise<{ status: string, result?: any, error?: string }>}
    */
-  async run(systemPrompt, userPrompt) {
+  async run(systemPrompt, userPrompt, history = []) {
     this.#aborted = false;
     this.#systemPrompt = systemPrompt;
-    this.#messages = [{ role: 'user', content: userPrompt }];
-    this.#responseId = null;  // Reset for new conversation
+    this.#messages = [...history, { role: 'user', content: userPrompt }];
 
     const sysTokens = estimateTokens(systemPrompt);
+    const histTokens = history.reduce((sum, m) => sum + estimateTokens(m.content), 0);
     const userTokens = estimateTokens(userPrompt);
-    this.#onLog('SEND', `System: ~${sysTokens} tokens, User: ~${userTokens} tokens`, systemPrompt);
+    const histInfo = history.length > 0 ? `, History: ~${histTokens} tokens (${history.length} turns)` : '';
+    this.#onLog('SEND', `System: ~${sysTokens} tokens${histInfo}, User: ~${userTokens} tokens`, systemPrompt);
 
     return this.#loop();
   }
@@ -82,6 +123,13 @@ export class AgentRunner {
   abort() {
     this.#aborted = true;
     if (this.#resolveQuestion) { this.#resolveQuestion(null); this.#resolveQuestion = null; }
+  }
+
+  /** Strip internal metadata before pushing to conversation history. */
+  #cleanForHistory(obj) {
+    if (!obj._responsesMetadata) return JSON.stringify(obj);
+    const { _responsesMetadata, ...rest } = obj;
+    return JSON.stringify(rest);
   }
 
   // ---------------------------------------------------------------------------
@@ -122,6 +170,7 @@ export class AgentRunner {
         type: 'thinking',
         label: iteration === 0 ? 'Analyzed request' : 'Processed',
         reasoning: isTerminal ? null : (parsed.reasoning || null),
+        responsesMetadata: parsed._responsesMetadata || null,
         status: 'done',
         startedAt: performance.now(),
         completedAt: performance.now(),
@@ -133,8 +182,8 @@ export class AgentRunner {
           return { status: 'done', result: parsed.result || parsed, reasoning: parsed.reasoning };
 
         case 'tool_call': {
-          const continueLoop = await this.#handleToolCall(parsed);
-          if (!continueLoop) return { status: 'error', error: 'Tool call failed or rejected' };
+          const ok = await this.#handleToolCall(parsed);
+          if (!ok) return { status: 'error', error: 'Tool call rejected by user' };
           break;
         }
 
@@ -143,7 +192,7 @@ export class AgentRunner {
             for (const call of parsed.calls) {
               if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
               const ok = await this.#handleToolCall({ ...call, reasoning: parsed.reasoning });
-              if (!ok) return { status: 'error', error: 'Tool call failed or rejected' };
+              if (!ok) return { status: 'error', error: 'Tool call rejected by user' };
             }
           }
           break;
@@ -164,7 +213,7 @@ export class AgentRunner {
           const answer = await new Promise(resolve => { this.#resolveQuestion = resolve; });
           if (!answer || this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-          this.#messages.push({ role: 'assistant', content: JSON.stringify(parsed) });
+          this.#messages.push({ role: 'assistant', content: this.#cleanForHistory(parsed) });
           this.#messages.push({ role: 'user', content: answer });
           break;
         }
@@ -229,7 +278,7 @@ export class AgentRunner {
     });
 
     // Append to conversation
-    this.#messages.push({ role: 'assistant', content: JSON.stringify(call) });
+    this.#messages.push({ role: 'assistant', content: this.#cleanForHistory(call) });
 
     const resultText = result.status === 'success'
       ? (typeof result.data === 'object' ? JSON.stringify(result.data) : String(result.data ?? ''))
@@ -246,7 +295,9 @@ export class AgentRunner {
       content: `Tool "${toolId}" result:\n${truncated}\n\nContinue with your task. Respond with JSON.`,
     });
 
-    return result.status === 'success';
+    // Always continue — let the AI see the error and decide what to do
+    // Only abort if the user explicitly rejected a confirmation
+    return result.status !== 'rejected';
   }
 
   // ---------------------------------------------------------------------------
@@ -254,23 +305,20 @@ export class AgentRunner {
   // ---------------------------------------------------------------------------
 
   async #callAi() {
-    const useResponses = isAzureResponses(this.#settings);
+    const useResponses = isResponsesApi(this.#settings);
 
     const { url, headers, body } = buildAiRequest(
-      this.#settings.aiProvider, this.#systemPrompt, this.#messages, this.#settings,
-      { previousResponseId: this.#responseId }
+      this.#settings.aiProvider, this.#systemPrompt, this.#messages, this.#settings
     );
 
-    // Log request summary
-    const inputItems = body.messages || body.input || [];
-    const itemsArray = Array.isArray(inputItems) ? inputItems : [{ content: inputItems }];
-    const msgSummary = itemsArray.map(m => {
-      const c = typeof m.content === 'string' ? m.content : (typeof m === 'string' ? m : JSON.stringify(m));
-      return `[${m.role || '?'}] ${c.length > 200 ? c.slice(0, 200) + '\u2026' : c}`;
-    }).join('\n');
+    // Log full raw request
     const mode = useResponses ? 'Responses API' : 'Chat Completions';
-    const prevId = this.#responseId ? ` (prev: ${this.#responseId.slice(0, 16)}...)` : '';
-    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} [${mode}]${prevId} \u2014 ${itemsArray.length} items`, msgSummary);
+    const safeHeaders = { ...headers };
+    if (safeHeaders['api-key']) safeHeaders['api-key'] = '***';
+    if (safeHeaders.Authorization) safeHeaders.Authorization = 'Bearer ***';
+    if (safeHeaders['x-api-key']) safeHeaders['x-api-key'] = '***';
+    const rawRequest = JSON.stringify({ url, method: 'POST', headers: safeHeaders, body }, null, 2);
+    this.#onLog('SEND', `POST ${url.replace(/\/\/.*@/, '//***@')} [${mode}]`, rawRequest);
 
     let responseData;
     const startTime = performance.now();
@@ -283,26 +331,42 @@ export class AgentRunner {
     }
     const duration = ((performance.now() - startTime) / 1000).toFixed(1);
 
+    // Log full raw response
+    const rawResponse = JSON.stringify(responseData, null, 2);
     const extracted = extractAiResponse(this.#settings.aiProvider, responseData, this.#settings);
-    const { content, inputTokens, outputTokens } = extracted;
-
-    // Track response ID for Responses API multi-turn
-    if (extracted.responseId) {
-      this.#responseId = extracted.responseId;
-    }
+    const { content, inputTokens, outputTokens, responsesMetadata } = extracted;
 
     const tokenInfo = inputTokens != null ? ` \u2014 in: ${inputTokens}, out: ${outputTokens}` : '';
-    const respIdInfo = extracted.responseId ? ` [${extracted.responseId.slice(0, 20)}...]` : '';
-    this.#onLog('RECV', `200 OK \u2014 ${duration}s${tokenInfo}${respIdInfo}`, content || '(empty)');
+    this.#onLog('RECV', `200 OK \u2014 ${duration}s${tokenInfo}`, rawResponse);
 
     if (!content) throw new Error('AI returned empty response');
 
-    const cleaned = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
-    try {
-      return JSON.parse(cleaned);
-    } catch (e) {
-      this.#onLog('ERR', `JSON parse failed: ${e.message}`, content);
-      throw new Error(`Invalid JSON from AI: ${e.message}`);
+    let cleaned = content.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+    // Models sometimes emit raw control characters (newlines/tabs) inside JSON strings.
+    // Escape them before parsing: replace unescaped control chars (0x00-0x1F) inside strings.
+    cleaned = cleaned.replace(/[\x00-\x1f]/g, (ch) => {
+      if (ch === '\n') return '\\n';
+      if (ch === '\r') return '\\r';
+      if (ch === '\t') return '\\t';
+      return '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0');
+    });
+    const parse = (s) => {
+      try { return JSON.parse(s); }
+      catch (e) { return { error: e, raw: s }; }
+    };
+    let result = parse(cleaned);
+    if (result.error) {
+      const repaired = repairJson(cleaned);
+      const second = parse(repaired);
+      if (second.error) {
+        this.#onLog('ERR', `JSON parse failed: ${result.error.message}`, content);
+        throw new Error(`Invalid JSON from AI: ${result.error.message}`);
+      }
+      this.#onLog('WARN', 'JSON repaired successfully', `Original error: ${result.error.message}`);
+      result = second;
     }
+    // Attach Responses API metadata (reasoning, web search) for timeline rendering
+    if (responsesMetadata) result._responsesMetadata = responsesMetadata;
+    return result;
   }
 }

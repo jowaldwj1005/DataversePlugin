@@ -163,6 +163,22 @@ export class FormTools {
     }
   }
 
+  /**
+   * Called when the Dynamics 365 page URL changes (record/entity navigation).
+   * Invalidates cached form context and reloads if the fields tab is visible.
+   */
+  onPageChanged() {
+    this._formContext = null;
+    this._schemaMetadata = null;
+    this._mergedFields = [];
+    this._formEvents = null;
+    this._recordData = null;
+    this._apiRecordData = null;
+    if (this._root) {
+      this._renderActiveTab();
+    }
+  }
+
   destroy() {
     this.onHide();
     if (this._root) { this._root.remove(); this._root = null; }

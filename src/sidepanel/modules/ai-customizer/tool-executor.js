@@ -10,6 +10,7 @@ export class ToolExecutor {
   #api;
   #cache;
   #bridge = null;
+  #skillManager = null;
   #onConfirmation;  // (tool, params, reasoning) => Promise<boolean>
   #onLog;
 
@@ -32,6 +33,11 @@ export class ToolExecutor {
   /** Set the module bridge (called after app is available). */
   setBridge(bridge) {
     this.#bridge = bridge;
+  }
+
+  /** Set the skill manager (called after init). */
+  setSkillManager(sm) {
+    this.#skillManager = sm;
   }
 
   /**
@@ -74,6 +80,7 @@ export class ToolExecutor {
         cache: this.#cache,
         log: this.#onLog,
         bridge: this.#bridge,
+        skillManager: this.#skillManager,
       };
       const result = await tool.handler(params, ctx);
       const duration = ((performance.now() - startTime) / 1000).toFixed(1);
