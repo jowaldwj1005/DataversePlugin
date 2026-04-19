@@ -32,11 +32,21 @@ const STATUS_ICONS = {
   waiting: '?',
 };
 
+const THINKING_LABELS = [
+  'Thinking', 'Querying the matrix', 'Consulting the dataverse',
+  'Crunching metadata', 'Asking the oracle', 'Brewing a response',
+  'Spinning up neurons', 'Reading the docs (just kidding)',
+  'Fetching wisdom', 'Dataversing', 'Herding entities',
+  'Untangling relationships', 'Decoding the schema',
+];
+
 export class AgentTimeline {
   #container;
   #steps = [];
   #stepElements = new Map();
   #onAnswer = null; // (answer: string) => void — set when question is pending
+  #thinkingTimers = new Map(); // stepId → intervalId
+  #lastThinkingIdx = -1;
 
   constructor(container) {
     this.#container = container;
@@ -71,11 +81,22 @@ export class AgentTimeline {
   }
 
   clear() {
+    // Stop all running animations
+    for (const id of this.#thinkingTimers.values()) clearInterval(id);
+    this.#thinkingTimers.clear();
     this.#steps = [];
     this.#stepElements.clear();
     this.#container.innerHTML = '';
     // Note: do NOT clear #onAnswer — it's set once by the parent module
     // and must persist across clear() calls within the same session.
+  }
+
+  #pickThinkingLabel() {
+    let idx;
+    do { idx = Math.floor(Math.random() * THINKING_LABELS.length); }
+    while (idx === this.#lastThinkingIdx && THINKING_LABELS.length > 1);
+    this.#lastThinkingIdx = idx;
+    return THINKING_LABELS[idx];
   }
 
   #renderStep(step) {
@@ -89,6 +110,12 @@ export class AgentTimeline {
     }
 
     el.className = `${CSS}-timeline-step ${CSS}-timeline-step-${step.status}`;
+
+    // Stop any existing animation for this step
+    if (this.#thinkingTimers.has(step.id)) {
+      clearInterval(this.#thinkingTimers.get(step.id));
+      this.#thinkingTimers.delete(step.id);
+    }
 
     // Duration
     let durationText = '';
@@ -106,6 +133,27 @@ export class AgentTimeline {
       <span class="${CSS}-timeline-label">${this.#escapeHtml(step.label)}</span>
       <span class="${CSS}-timeline-duration">${durationText}</span>
     `;
+
+    // Animate thinking steps: cycle dots + rotate labels
+    if (step.type === 'thinking' && step.status === 'running') {
+      const labelEl = el.querySelector(`.${CSS}-timeline-label`);
+      let dotPhase = 0;
+      let tickCount = 0;
+      let currentLabel = this.#pickThinkingLabel();
+
+      const interval = setInterval(() => {
+        dotPhase = (dotPhase + 1) % 3;
+        tickCount++;
+        // Rotate label every 4 ticks (~1.6s at 400ms interval)
+        if (tickCount % 4 === 0) {
+          currentLabel = this.#pickThinkingLabel();
+        }
+        const dots = '.'.repeat(dotPhase + 1);
+        labelEl.textContent = `${currentLabel}${dots}`;
+      }, 400);
+
+      this.#thinkingTimers.set(step.id, interval);
+    }
 
     // Tool call details (expandable)
     if (step.toolCall && (step.type === 'tool_call' || step.type === 'tool_result')) {

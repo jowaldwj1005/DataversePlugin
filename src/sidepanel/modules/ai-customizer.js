@@ -624,6 +624,7 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
   }
 
   _buildSkillCard(skill) {
+    const isSystem = skill.system === true;
     const card = document.createElement('div');
     card.className = `${CSS}-skill-card`;
 
@@ -631,20 +632,28 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
     const header = document.createElement('div');
     header.className = `${CSS}-skill-card-header`;
 
-    const toggle = document.createElement('button');
-    toggle.className = `${CSS}-skill-card-toggle${skill.enabled !== false ? ' on' : ''}`;
-    toggle.title = skill.enabled !== false ? 'Enabled' : 'Disabled';
-    toggle.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await this.#skillManager.update(skill.id, { enabled: skill.enabled === false });
-      this._renderSkillDrawer();
-    });
+    if (isSystem) {
+      const badge = document.createElement('span');
+      badge.className = `${CSS}-skill-card-system-badge`;
+      badge.textContent = 'System';
+      header.appendChild(badge);
+    } else {
+      const toggle = document.createElement('button');
+      toggle.className = `${CSS}-skill-card-toggle${skill.enabled !== false ? ' on' : ''}`;
+      toggle.title = skill.enabled !== false ? 'Enabled' : 'Disabled';
+      toggle.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await this.#skillManager.update(skill.id, { enabled: skill.enabled === false });
+        this._renderSkillDrawer();
+      });
+      header.appendChild(toggle);
+    }
 
     const name = document.createElement('span');
     name.className = `${CSS}-skill-card-name`;
     name.textContent = skill.name;
 
-    header.append(toggle, name);
+    header.appendChild(name);
     header.addEventListener('click', () => {
       const body = card.querySelector(`.${CSS}-skill-card-body`);
       if (body) {
@@ -689,20 +698,22 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
     content.innerHTML = this._renderMarkdown(skill.content);
     body.appendChild(content);
 
-    const bodyActions = document.createElement('div');
-    bodyActions.className = `${CSS}-skill-card-body-actions`;
-    const editBtn = document.createElement('button');
-    editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', () => this._showSkillForm(skill));
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.className = 'danger';
-    deleteBtn.addEventListener('click', async () => {
-      await this.#skillManager.delete(skill.id);
-      this._renderSkillDrawer();
-    });
-    bodyActions.append(editBtn, deleteBtn);
-    body.appendChild(bodyActions);
+    if (!isSystem) {
+      const bodyActions = document.createElement('div');
+      bodyActions.className = `${CSS}-skill-card-body-actions`;
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => this._showSkillForm(skill));
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'danger';
+      deleteBtn.addEventListener('click', async () => {
+        await this.#skillManager.delete(skill.id);
+        this._renderSkillDrawer();
+      });
+      bodyActions.append(editBtn, deleteBtn);
+      body.appendChild(bodyActions);
+    }
 
     card.appendChild(body);
     return card;
@@ -1320,7 +1331,9 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
         `Do NOT wrap JSON in code fences. Return raw JSON only.`,
         `Only call "inspect_form" when the user explicitly asks about a form or record they have open. Do NOT call it proactively.`,
         `If a tool call fails, recover gracefully — tell the user what happened and offer alternatives.`,
-        `You can create skills — reusable knowledge that persists across conversations. When you learn something new and non-obvious (API patterns, correct request formats, workarounds), offer to save it as a skill.`,
+        `If a tool call is rejected by the user, they may provide guidance on what to do instead. Adapt your approach — do NOT retry the exact same call.`,
+        `Before executing queries that may return large result sets (100+ records), use $top or $filter to limit results. NEVER list all entities unfiltered — use get_entities with a filter param or execute_odata with $top. Prefer targeted queries over broad scans.`,
+        `You can create skills — reusable knowledge that persists across conversations. When you successfully complete a non-trivial multi-step task (especially metadata, solutions, or schema operations), proactively offer to save the pattern as a skill — don't wait to be asked.`,
         `Prefer "execute_action" for sending requests directly instead of "load_request" (which navigates away from chat). Only use navigation tools when the user needs to SEE a visual artifact.`,
       ];
       const excludeTools = new Set();
@@ -1361,6 +1374,7 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
         this.#toolExecutor, this.#toolRegistry, {
           onStep: (step) => { timeline.updateStep(step); this._scrollChat(); },
           onLog: (tag, summary, detail) => this._log(tag, summary, detail),
+          onRejection: (toolId, params) => this._showRejectionInput(toolId, params),
         });
 
       const result = await this.#runner.run(systemPrompt, userPrompt, priorHistory);
@@ -1485,6 +1499,54 @@ Each attribute type requires its own \`@odata.type\`. All Label objects need \`@
       // Insert into the chat area (at the bottom, before input)
       this.#chatArea.appendChild(container);
       this._scrollChat();
+    });
+  }
+
+  /**
+   * Show an inline input after a tool rejection so the user can guide the agent.
+   * Resolves with the user's text (or null if they skip).
+   */
+  _showRejectionInput(toolId, params) {
+    return new Promise((resolve) => {
+      const container = document.createElement('div');
+      container.className = `${CSS}-rejection-input`;
+
+      const label = document.createElement('div');
+      label.className = `${CSS}-rejection-label`;
+      label.textContent = `Rejected: ${toolId} — tell the agent what to do instead?`;
+      container.appendChild(label);
+
+      const row = document.createElement('div');
+      row.className = `${CSS}-rejection-row`;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = `${CSS}-rejection-text`;
+      input.placeholder = 'e.g. "use a different approach" or leave empty to skip';
+
+      const sendBtn = document.createElement('button');
+      sendBtn.className = `${CSS}-btn ${CSS}-btn-primary`;
+      sendBtn.textContent = 'Send';
+
+      const skipBtn = document.createElement('button');
+      skipBtn.className = `${CSS}-btn ${CSS}-btn-tiny`;
+      skipBtn.textContent = 'Skip';
+
+      const submit = () => {
+        const text = input.value.trim() || null;
+        container.remove();
+        resolve(text);
+      };
+
+      sendBtn.addEventListener('click', submit);
+      skipBtn.addEventListener('click', () => { container.remove(); resolve(null); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+      row.append(input, sendBtn, skipBtn);
+      container.append(label, row);
+      this.#chatArea.appendChild(container);
+      this._scrollChat();
+      requestAnimationFrame(() => input.focus());
     });
   }
 

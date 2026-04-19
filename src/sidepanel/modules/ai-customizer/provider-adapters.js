@@ -56,7 +56,7 @@ function _buildResponses(provider, systemPrompt, messages, settings) {
 
   // Reasoning effort (off by default)
   if (settings.aiReasoning) {
-    body.reasoning = { effort: settings.aiReasoning };
+    body.reasoning = { effort: settings.aiReasoning, summary: 'auto' };
   }
 
   // Web search tool

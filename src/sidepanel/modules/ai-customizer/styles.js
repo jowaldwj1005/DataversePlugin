@@ -717,6 +717,36 @@ export function injectStyles() {
       margin-top: 8px;
     }
 
+    /* Rejection guidance input */
+    .${CSS}-rejection-input {
+      padding: 8px 12px;
+      margin: 4px 0;
+      border: 1px solid var(--color-warning, #e6a700);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg-panel);
+    }
+    .${CSS}-rejection-label {
+      font-size: 0.72rem;
+      color: var(--color-warning, #e6a700);
+      margin-bottom: 6px;
+    }
+    .${CSS}-rejection-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .${CSS}-rejection-text {
+      flex: 1;
+      padding: 4px 6px;
+      font-size: 0.78rem;
+      background: var(--color-bg-input);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-primary);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+    }
+    .${CSS}-rejection-text:focus { border-color: var(--color-border-focus); outline: none; }
+
     /* Action bar */
     .${CSS}-action-bar {
       display: flex;
@@ -1038,6 +1068,18 @@ export function injectStyles() {
       transition: left 0.15s;
     }
     .${CSS}-skill-card-toggle.on::after { left: 14px; }
+
+    .${CSS}-skill-card-system-badge {
+      font-size: 0.58rem;
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: var(--color-accent-secondary, var(--color-accent));
+      color: var(--color-bg);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
 
     .${CSS}-skill-card-meta {
       display: flex;

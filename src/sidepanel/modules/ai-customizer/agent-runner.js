@@ -50,6 +50,20 @@ function repairJson(text) {
 
 let stepCounter = 0;
 
+const DONE_LABELS = [
+  'Thought about it', 'Got it', 'Figured it out', 'Connected the dots',
+  'Eureka', 'Done thinking', 'Nailed it',
+];
+
+let lastDoneIdx = -1;
+
+function pickDoneLabel() {
+  let idx;
+  do { idx = Math.floor(Math.random() * DONE_LABELS.length); } while (idx === lastDoneIdx && DONE_LABELS.length > 1);
+  lastDoneIdx = idx;
+  return DONE_LABELS[idx];
+}
+
 export class AgentRunner {
   #api;
   #cache;
@@ -58,6 +72,7 @@ export class AgentRunner {
   #toolRegistry;
   #onStep;
   #onLog;
+  #onRejection;
   #maxIterations;
   #aborted = false;
 
@@ -76,9 +91,10 @@ export class AgentRunner {
    * @param {Object} callbacks
    * @param {(step: Object) => void} callbacks.onStep
    * @param {(tag: string, summary: string, detail?: string) => void} callbacks.onLog
+   * @param {(toolId: string, params: Object) => Promise<string|null>} [callbacks.onRejection]
    * @param {number} [callbacks.maxIterations=10]
    */
-  constructor(api, cache, settings, toolExecutor, toolRegistry, { onStep, onLog, maxIterations = 10 }) {
+  constructor(api, cache, settings, toolExecutor, toolRegistry, { onStep, onLog, onRejection, maxIterations = 10 }) {
     this.#api = api;
     this.#cache = cache;
     this.#settings = settings;
@@ -86,6 +102,7 @@ export class AgentRunner {
     this.#toolRegistry = toolRegistry;
     this.#onStep = onStep;
     this.#onLog = onLog;
+    this.#onRejection = onRejection || (() => Promise.resolve(null));
     this.#maxIterations = maxIterations;
   }
 
@@ -140,12 +157,12 @@ export class AgentRunner {
     for (let iteration = 0; iteration < this.#maxIterations; iteration++) {
       if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
 
-      // Step: calling AI
+      // Step: calling AI (label is animated by AgentTimeline)
       const thinkStepId = `step-${++stepCounter}`;
       this.#onStep({
         id: thinkStepId,
         type: 'thinking',
-        label: iteration === 0 ? 'Analyzing your request...' : 'Processing...',
+        label: 'Thinking...',
         reasoning: null,
         status: 'running',
         startedAt: performance.now(),
@@ -168,7 +185,7 @@ export class AgentRunner {
       this.#onStep({
         id: thinkStepId,
         type: 'thinking',
-        label: iteration === 0 ? 'Analyzed request' : 'Processed',
+        label: pickDoneLabel(),
         reasoning: isTerminal ? null : (parsed.reasoning || null),
         responsesMetadata: parsed._responsesMetadata || null,
         status: 'done',
@@ -182,8 +199,7 @@ export class AgentRunner {
           return { status: 'done', result: parsed.result || parsed, reasoning: parsed.reasoning };
 
         case 'tool_call': {
-          const ok = await this.#handleToolCall(parsed);
-          if (!ok) return { status: 'error', error: 'Tool call rejected by user' };
+          await this.#handleToolCall(parsed);
           break;
         }
 
@@ -191,8 +207,7 @@ export class AgentRunner {
           if (Array.isArray(parsed.calls)) {
             for (const call of parsed.calls) {
               if (this.#aborted) return { status: 'error', error: 'Aborted by user' };
-              const ok = await this.#handleToolCall({ ...call, reasoning: parsed.reasoning });
-              if (!ok) return { status: 'error', error: 'Tool call rejected by user' };
+              await this.#handleToolCall({ ...call, reasoning: parsed.reasoning });
             }
           }
           break;
@@ -280,9 +295,19 @@ export class AgentRunner {
     // Append to conversation
     this.#messages.push({ role: 'assistant', content: this.#cleanForHistory(call) });
 
+    if (result.status === 'rejected') {
+      // User rejected — wait for optional guidance via onRejection callback
+      const guidance = await this.#onRejection(toolId, params);
+      const msg = guidance
+        ? `Tool "${toolId}" was REJECTED by the user. The user says: "${guidance}"\n\nFollow the user's guidance. Respond with JSON.`
+        : `Tool "${toolId}" was REJECTED by the user. Do NOT retry this exact call. Find an alternative approach or ask the user what to do. Respond with JSON.`;
+      this.#messages.push({ role: 'user', content: msg });
+      return;
+    }
+
     const resultText = result.status === 'success'
       ? (typeof result.data === 'object' ? JSON.stringify(result.data) : String(result.data ?? ''))
-      : `Error: ${result.error || 'rejected'}`;
+      : `Error: ${result.error || 'unknown'}`;
 
     // Truncate large results
     const maxLen = 8000;
@@ -294,10 +319,6 @@ export class AgentRunner {
       role: 'user',
       content: `Tool "${toolId}" result:\n${truncated}\n\nContinue with your task. Respond with JSON.`,
     });
-
-    // Always continue — let the AI see the error and decide what to do
-    // Only abort if the user explicitly rejected a confirmation
-    return result.status !== 'rejected';
   }
 
   // ---------------------------------------------------------------------------

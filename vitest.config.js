@@ -5,5 +5,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/setup.js'],
     include: ['test/**/*.test.js'],
+    pool: 'forks',
+    poolOptions: { forks: { maxForks: 1 } },
   },
 });
