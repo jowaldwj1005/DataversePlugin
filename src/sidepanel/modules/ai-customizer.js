@@ -385,41 +385,158 @@ export default class AiCustomizer {
   // -----------------------------------------------------------------------
 
   async _seedDefaultSkills() {
-    if (this.#skillManager.getAll().length > 0) return; // already has skills
-    // Show empty drawer first, then animate the skill in
+    if (this.#skillManager.getAll().length > 0) return;
     this._renderSkillDrawer();
     await new Promise(r => setTimeout(r, 600));
-    await this.#skillManager.create(
-      'Dataverse custom table creation via Web API',
-      `Use the Dataverse Web API metadata endpoint to create custom tables by sending a POST request to \`EntityDefinitions\` with a full metadata payload. Do not use a \`CreateEntity\` action for this scenario.
 
-**Key points:**
-- **Endpoint:** \`POST EntityDefinitions\`
-- Include required metadata:
-  - \`SchemaName\`, \`DisplayName\` (Label), \`DisplayCollectionName\` (Label)
-  - \`OwnershipType\` (typically \`UserOwned\` or \`OrganizationOwned\`)
-  - \`Attributes\` containing a \`StringAttributeMetadata\` entry for the primary name column
-- The primary name attribute must be in \`Attributes\` with \`IsPrimaryName = true\`
-- Use a valid customization prefix in schema names, e.g. \`new_testchromplugin\` (no hyphens)
-- A successful create may return \`204 No Content\`
-- After creating, publish the entity so it becomes visible
+    // Skill 1: Create tables
+    await this.#skillManager.create(
+      'Create Dataverse tables via Web API',
+      `**Endpoint:** \`POST EntityDefinitions\`
+**Header:** \`MSCRM.SolutionUniqueName: YourSolution\` (to assign to a solution)
+
+**Required body structure:**
+- \`@odata.type\`: \`Microsoft.Dynamics.CRM.EntityMetadata\`
+- \`SchemaName\`: e.g. \`prefix_tablename\` (no hyphens, use underscores)
+- \`DisplayName\` and \`DisplayCollectionName\`: Label objects with \`@odata.type: Microsoft.Dynamics.CRM.Label\`
+- \`OwnershipType\`: \`UserOwned\` or \`OrganizationOwned\`
+- \`HasNotes\`, \`HasActivities\`, \`IsActivity\`: booleans
+- \`Attributes\`: array containing the **primary name column** as \`StringAttributeMetadata\` with \`IsPrimaryName: true\`
+
+**Minimal working example:**
+\`\`\`json
+{
+  "@odata.type": "Microsoft.Dynamics.CRM.EntityMetadata",
+  "SchemaName": "prefix_demo",
+  "DisplayName": { "LocalizedLabels": [{ "Label": "Demo", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" },
+  "DisplayCollectionName": { "LocalizedLabels": [{ "Label": "Demos", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" },
+  "OwnershipType": "UserOwned",
+  "HasNotes": false,
+  "HasActivities": false,
+  "IsActivity": false,
+  "Attributes": [{
+    "@odata.type": "Microsoft.Dynamics.CRM.StringAttributeMetadata",
+    "SchemaName": "prefix_name",
+    "IsPrimaryName": true,
+    "RequiredLevel": { "Value": "ApplicationRequired" },
+    "MaxLength": 200,
+    "DisplayName": { "LocalizedLabels": [{ "Label": "Name", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }
+  }]
+}
+\`\`\`
 
 **Common pitfalls:**
-- Missing primary name attribute causes creation failure
-- Putting \`PrimaryAttribute\` directly on the entity payload is not valid for this Web API pattern
-- Calling \`CreateEntity\` as a Web API action may fail — it is not the correct route
-
-**Follow-up:** Run \`publish_entity\` after successful creation.`,
+- Missing \`@odata.type\` on Label objects or the entity itself → OData deserialization error
+- Using \`PrimaryAttribute\` as a top-level property → invalid, must be in \`Attributes[]\` with \`IsPrimaryName: true\`
+- Using \`CreateEntity\` action instead of \`POST EntityDefinitions\` → wrong route
+- Hyphens in SchemaName → validation error
+- After creation: run \`publish_entity\` to make the table visible`,
       {
         tags: ['dataverse', 'webapi', 'metadata', 'entity', 'table-creation'],
-        trigger: 'When creating a custom Dataverse table/entity via API or troubleshooting EntityDefinitions metadata requests',
+        trigger: 'When creating custom Dataverse tables/entities via the Web API',
         linkedTools: ['execute_action'],
       }
     );
-    // Re-render to show the new skill, then Clippy
+
+    // Skill 2: Add columns
+    await this.#skillManager.create(
+      'Add columns to Dataverse tables via Web API',
+      `**Endpoint:** \`POST EntityDefinitions(LogicalName='entityname')/Attributes\`
+**Header:** \`MSCRM.SolutionUniqueName: YourSolution\`
+
+Each attribute type requires its own \`@odata.type\`. All Label objects need \`@odata.type: Microsoft.Dynamics.CRM.Label\`.
+
+**String (single line):**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.StringAttributeMetadata", "SchemaName": "prefix_field", "MaxLength": 200, "FormatName": { "Value": "Text" }, "DisplayName": { "LocalizedLabels": [{ "Label": "Field", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" } }
+\`\`\`
+
+**Memo (multi-line text):**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.MemoAttributeMetadata", "SchemaName": "prefix_description", "MaxLength": 1048576, "Format": "Text", "DisplayName": { "LocalizedLabels": [{ "Label": "Description", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" } }
+\`\`\`
+
+**Boolean (Yes/No):**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.BooleanAttributeMetadata", "SchemaName": "prefix_flag", "DefaultValue": false, "DisplayName": { "LocalizedLabels": [{ "Label": "Flag", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" }, "OptionSet": { "@odata.type": "Microsoft.Dynamics.CRM.BooleanOptionSetMetadata", "TrueOption": { "Value": 1, "Label": { "LocalizedLabels": [{ "Label": "Yes", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" } }, "FalseOption": { "Value": 0, "Label": { "LocalizedLabels": [{ "Label": "No", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" } } } }
+\`\`\`
+
+**Choice/Picklist:**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.PicklistAttributeMetadata", "SchemaName": "prefix_category", "DisplayName": { "LocalizedLabels": [{ "Label": "Category", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" }, "OptionSet": { "@odata.type": "Microsoft.Dynamics.CRM.OptionSetMetadata", "IsGlobal": false, "OptionSetType": "Picklist", "Options": [{ "Value": 100000000, "Label": { "LocalizedLabels": [{ "Label": "Option A", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" } }, { "Value": 100000001, "Label": { "LocalizedLabels": [{ "Label": "Option B", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" } }] } }
+\`\`\`
+
+**Integer:**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.IntegerAttributeMetadata", "SchemaName": "prefix_count", "MinValue": 0, "MaxValue": 2147483647, "Format": "None", "DisplayName": { "LocalizedLabels": [{ "Label": "Count", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" } }
+\`\`\`
+
+**File:**
+\`\`\`json
+{ "@odata.type": "Microsoft.Dynamics.CRM.FileAttributeMetadata", "SchemaName": "prefix_file", "MaxSizeInKB": 131072, "DisplayName": { "LocalizedLabels": [{ "Label": "File", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" }, "RequiredLevel": { "Value": "None" } }
+\`\`\`
+
+**RequiredLevel values:** \`None\`, \`ApplicationRequired\`, \`SystemRequired\``,
+      {
+        tags: ['dataverse', 'webapi', 'metadata', 'attributes', 'columns'],
+        trigger: 'When adding columns/attributes to existing Dataverse tables',
+        linkedTools: ['execute_action'],
+      }
+    );
+
+    // Skill 3: Create relationships
+    await this.#skillManager.create(
+      'Create Dataverse relationships via Web API',
+      `**Endpoint:** \`POST RelationshipDefinitions\`
+**Header:** \`MSCRM.SolutionUniqueName: YourSolution\`
+
+**1:N Lookup relationship:**
+\`\`\`json
+{
+  "@odata.type": "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata",
+  "SchemaName": "prefix_parent_child",
+  "ReferencedEntity": "prefix_parent",
+  "ReferencingEntity": "prefix_child",
+  "Lookup": {
+    "@odata.type": "Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+    "SchemaName": "prefix_parentid",
+    "DisplayName": { "LocalizedLabels": [{ "Label": "Parent", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" },
+    "RequiredLevel": { "Value": "ApplicationRequired" }
+  }
+}
+\`\`\`
+
+**Self-referential lookup** (same entity in both Referenced and Referencing):
+\`\`\`json
+{
+  "@odata.type": "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata",
+  "SchemaName": "prefix_item_parentitem",
+  "ReferencedEntity": "prefix_item",
+  "ReferencingEntity": "prefix_item",
+  "Lookup": {
+    "@odata.type": "Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+    "SchemaName": "prefix_parentitemid",
+    "DisplayName": { "LocalizedLabels": [{ "Label": "Parent Item", "LanguageCode": 1033 }], "@odata.type": "Microsoft.Dynamics.CRM.Label" },
+    "RequiredLevel": { "Value": "None" }
+  }
+}
+\`\`\`
+
+**Key points:**
+- \`ReferencedEntity\` = the "one" side (parent), \`ReferencingEntity\` = the "many" side (child)
+- The \`Lookup\` object creates the actual lookup column on the referencing entity
+- \`SchemaName\` on the relationship must be globally unique
+- \`RequiredLevel\`: use \`ApplicationRequired\` for mandatory lookups, \`None\` for optional`,
+      {
+        tags: ['dataverse', 'webapi', 'metadata', 'relationships', 'lookups'],
+        trigger: 'When creating relationships/lookups between Dataverse tables',
+        linkedTools: ['execute_action'],
+      }
+    );
+
     this._renderSkillDrawer();
     import('./easter-eggs.js').then(ee => ee.forceShowClippy(
-      'Ich hab dir mal nen ersten Skill kreiert,\ndamit du so tun kannst als könntest du\nDatenmodelle entwerfen. 📎✨'
+      'Ich hab dir 3 Skills kreiert,\ndamit du so tun kannst als könntest du\nDatenmodelle entwerfen. 📎✨'
     )).catch(() => {});
   }
 
@@ -533,7 +650,7 @@ export default class AiCustomizer {
       if (body) {
         const opening = !body.classList.contains('open');
         body.classList.toggle('open');
-        if (opening && skill.name === 'Dataverse custom table creation via Web API') {
+        if (opening && skill.name === 'Create Dataverse tables via Web API') {
           import('./easter-eggs.js').then(ee => ee.forceShowClippy(
             'Ah, der Klassiker! EntityDefinitions POST —\ndamit fing alles an. Ohne mich wärst du\nnoch bei PrimaryAttribute. 📎'
           )).catch(() => {});
