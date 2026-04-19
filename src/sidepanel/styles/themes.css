@@ -158,6 +158,23 @@
   --erdp-rel-nn: #a78bfa;
   --erdp-rel-self: #f9a857;
   --erdp-required: #e06c75;
+
+  /* ERD v2 */
+  --erdv2-card-bg: #2a2a2e;
+  --erdv2-card-border: #3e3e42;
+  --erdv2-header-system: #2d333b;
+  --erdv2-header-custom: rgba(0, 120, 212, 0.18);
+  --erdv2-pill-system: #2d333b;
+  --erdv2-pill-custom: rgba(0, 120, 212, 0.25);
+  --erdv2-type-string: #569cd6;
+  --erdv2-type-number: #4ec9b0;
+  --erdv2-type-datetime: #ce9178;
+  --erdv2-type-optionset: #dcdcaa;
+  --erdv2-type-boolean: #9cdcfe;
+  --erdv2-type-lookup: #c586c0;
+  --erdv2-type-uniqueid: #7c858d;
+  --erdv2-type-image: #d19a66;
+  --erdv2-required: #e06c75;
 }
 
 /* ----------------------------------------------------------------
@@ -276,6 +293,23 @@
   --erdp-rel-nn: #7c3aed;
   --erdp-rel-self: #d97706;
   --erdp-required: #d13438;
+
+  /* ERD v2 */
+  --erdv2-card-bg: #ffffff;
+  --erdv2-card-border: #d0d0d0;
+  --erdv2-header-system: #f0f2f5;
+  --erdv2-header-custom: rgba(0, 120, 212, 0.1);
+  --erdv2-pill-system: #e8eaed;
+  --erdv2-pill-custom: rgba(0, 120, 212, 0.15);
+  --erdv2-type-string: #0451a5;
+  --erdv2-type-number: #098658;
+  --erdv2-type-datetime: #9c5d27;
+  --erdv2-type-optionset: #7a6e2e;
+  --erdv2-type-boolean: #0070c1;
+  --erdv2-type-lookup: #af00db;
+  --erdv2-type-uniqueid: #6b7280;
+  --erdv2-type-image: #a0522d;
+  --erdv2-required: #d13438;
 }
 
 /* ----------------------------------------------------------------

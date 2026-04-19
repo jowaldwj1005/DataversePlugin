@@ -18,7 +18,7 @@ const TAB_LABELS = {
   bulk: 'Bulk Operations',
   security: 'Security Inspector',
   erd: 'ERD Viewer',
-  erdpro: 'ERD Pro',
+  erdv2: 'ERD v2',
   toolbuilder: 'Tool Builder',
   aicustomizer: 'AI Agent',
   formtools: 'Form Tools',
@@ -145,7 +145,7 @@ export class ModuleBridge {
       if (state.body) section += `Body:\n\`\`\`json\n${state.body}\n\`\`\`\n`;
     } else if (activeTab === 'bulk' && state.operations?.length) {
       section += `\n${state.operations.length} operations loaded.\n`;
-    } else if ((activeTab === 'erd' || activeTab === 'erdpro') && state.solution) {
+    } else if ((activeTab === 'erd' || activeTab === 'erdv2') && state.solution) {
       section += `\nSolution: ${state.solution}\n`;
       if (state.entityCount) section += `Entities: ${state.entityCount}\n`;
     } else if (activeTab === 'security' && state.entity) {

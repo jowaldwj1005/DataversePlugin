@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Progressive data loading
- * @module erd-pro/data-loader
+ * ERD v2 — Progressive data loading
+ * @module erd-v2/data-loader
  */
 
 import { SYSTEM_FIELD_NAMES, SYSTEM_ATTR_TYPES, MAX_KEY_FIELDS } from './constants.js';

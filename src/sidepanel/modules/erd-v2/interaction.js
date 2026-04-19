@@ -1,6 +1,10 @@
 /**
- * ERD Pro — Drag, hover, selection, keyboard interaction
- * @module erd-pro/interaction
+ * ERD v2 — Drag, hover, selection, keyboard interaction
+ *
+ * Single click = select entity + highlight relationships + detail panel.
+ * No double-click focus mode. Esc = deselect.
+ *
+ * @module erd-v2/interaction
  */
 
 export class InteractionManager {
@@ -10,13 +14,15 @@ export class InteractionManager {
   #viewport;
   #minimap;
   #onSelect;
-  #onExpand;
   #isDragging = false;
   #dragEntity = null;
   #dragStart = { x: 0, y: 0 };
   #dragOrigin = { x: 0, y: 0 };
   #rafId = null;
   #keyHandler = null;
+
+  #svg;
+  #bgClickHandler;
 
   constructor(state, renderer, router, viewport, minimap, callbacks) {
     this.#state = state;
@@ -25,16 +31,15 @@ export class InteractionManager {
     this.#viewport = viewport;
     this.#minimap = minimap;
     this.#onSelect = callbacks.onSelect;
-    this.#onExpand = callbacks.onExpand;
   }
 
-  /** Bind interaction handlers to all current entity elements. */
   bindAll() {
     for (const ent of this.#state.entities) {
       const g = this.#renderer.getEntityEl(ent.LogicalName);
       if (g) this.#bindEntity(g, ent);
     }
     this.#setupKeyboard();
+    this.#setupBackgroundDeselect();
   }
 
   destroy() {
@@ -42,11 +47,13 @@ export class InteractionManager {
       document.removeEventListener('keydown', this.#keyHandler);
       this.#keyHandler = null;
     }
+    if (this.#bgClickHandler && this.#svg) {
+      this.#svg.removeEventListener('click', this.#bgClickHandler);
+      this.#bgClickHandler = null;
+    }
     if (this.#rafId) cancelAnimationFrame(this.#rafId);
   }
 
-  // -------------------------------------------------------------------------
-  // Entity interaction binding
   // -------------------------------------------------------------------------
 
   #bindEntity(g, ent) {
@@ -64,23 +71,23 @@ export class InteractionManager {
       this.#renderer.applyHighlight(name);
     });
     g.addEventListener('mouseleave', () => {
-      if (!this.#isDragging) this.#renderer.clearHighlight();
+      if (!this.#isDragging) {
+        // If an entity is selected, re-apply its highlight; otherwise clear
+        if (this.#state.selectedEntity) {
+          this.#renderer.applyHighlight(this.#state.selectedEntity);
+        } else {
+          this.#renderer.clearHighlight();
+        }
+      }
     });
 
-    // Click select
+    // Single click = select + detail panel
     g.addEventListener('click', (e) => {
       if (this.#isDragging) return;
       e.stopPropagation();
-      this.#state.set('selectedEntity', name);
+      this.#state.selectedEntity = name;
+      this.#renderer.applyHighlight(name);
       if (this.#onSelect) this.#onSelect(name);
-    });
-
-    // Double-click expand/collapse
-    g.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      const expanded = !this.#state.expanded.get(name);
-      this.#state.expanded.set(name, expanded);
-      if (this.#onExpand) this.#onExpand(name, expanded);
     });
 
     g.style.cursor = 'grab';
@@ -91,7 +98,7 @@ export class InteractionManager {
   // -------------------------------------------------------------------------
 
   #startDrag(e, entityName, g) {
-    this.#isDragging = false; // becomes true after movement threshold
+    this.#isDragging = false;
     this.#dragEntity = entityName;
     this.#dragStart = { x: e.clientX, y: e.clientY };
     const pos = this.#state.positions.get(entityName);
@@ -104,7 +111,6 @@ export class InteractionManager {
       const dx = e2.clientX - this.#dragStart.x;
       const dy = e2.clientY - this.#dragStart.y;
 
-      // Movement threshold to distinguish click from drag
       if (!this.#isDragging && Math.abs(dx) + Math.abs(dy) < 4) return;
       this.#isDragging = true;
 
@@ -114,15 +120,11 @@ export class InteractionManager {
 
       this.#state.positions.set(entityName, { x: newX, y: newY });
 
-      // Throttle visual updates
       if (!this.#rafId) {
         this.#rafId = requestAnimationFrame(() => {
           this.#rafId = null;
           this.#renderer.updateEntityPosition(entityName, newX, newY);
-
-          // During drag: quick 3-segment paths for connected edges
           this.#updateDragEdges(entityName);
-
           this.#minimap?.requestRender();
         });
       }
@@ -135,18 +137,12 @@ export class InteractionManager {
       g.removeEventListener('pointerup', onUp);
 
       if (this.#isDragging) {
-        // On drag end: full channel re-route for connected edges
-        this.#router.computeForEntity(entityName);
-        for (const [schema, pathD] of this.#state.edgePaths) {
-          const rel = this.#state.relationships.find(r => r.schemaName === schema);
-          if (rel && (rel.sourceEntity === entityName || rel.targetEntity === entityName)) {
-            this.#renderer.updateEdgePath(schema, pathD);
-          }
-        }
+        // Re-route all simple edges (straight lines) after drag
+        this.#router.computeSimple();
+        this.#renderer.updateAllEdges();
         this.#minimap?.requestRender();
       }
 
-      // Reset after a tick (so click handler can check isDragging)
       setTimeout(() => { this.#isDragging = false; this.#dragEntity = null; }, 10);
     };
 
@@ -154,10 +150,6 @@ export class InteractionManager {
     g.addEventListener('pointerup', onUp);
   }
 
-  /**
-   * During drag: compute simple 3-segment paths for connected edges.
-   * Fast O(degree) update, no channel routing needed.
-   */
   #updateDragEdges(entityName) {
     for (const rel of this.#state.relationships) {
       if (rel.sourceEntity !== entityName && rel.targetEntity !== entityName) continue;
@@ -168,15 +160,13 @@ export class InteractionManager {
       const tgtSize = this.#state.entitySizes.get(rel.targetEntity);
       if (!srcPos || !tgtPos || !srcSize || !tgtSize) continue;
 
-      // Simple path: source bottom center → midY → target top center
       const fx = srcPos.x + srcSize.w / 2;
       const fy = srcPos.y + srcSize.h;
       const tx = tgtPos.x + tgtSize.w / 2;
       const ty = tgtPos.y;
       const midY = (fy + ty) / 2;
 
-      const d = `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`;
-      this.#renderer.updateEdgePath(rel.schemaName, d);
+      this.#renderer.updateEdgePath(rel.schemaName, `M ${fx} ${fy} V ${midY} H ${tx} V ${ty}`);
     }
   }
 
@@ -205,11 +195,30 @@ export class InteractionManager {
           this.#viewport.fitToContent();
           break;
         case 'Escape':
-          this.#state.set('selectedEntity', null);
+          this.#state.selectedEntity = null;
           this.#renderer.clearHighlight();
           break;
       }
     };
     document.addEventListener('keydown', this.#keyHandler);
+  }
+
+  // -------------------------------------------------------------------------
+  // Background click to deselect
+  // -------------------------------------------------------------------------
+
+  #setupBackgroundDeselect() {
+    // Find the SVG element (parent of the root group)
+    this.#svg = this.#renderer.root?.closest('svg');
+    if (!this.#svg) return;
+
+    this.#bgClickHandler = (e) => {
+      // Only deselect if clicking on SVG background or edge layer (not on an entity)
+      if (e.target === this.#svg || e.target.closest('.erdv2-edges')) {
+        this.#state.selectedEntity = null;
+        this.#renderer.clearHighlight();
+      }
+    };
+    this.#svg.addEventListener('click', this.#bgClickHandler);
   }
 }

@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Throttled canvas minimap
- * @module erd-pro/minimap
+ * ERD v2 — Throttled canvas minimap
+ * @module erd-v2/minimap
  */
 
 export class Minimap {
@@ -19,7 +19,7 @@ export class Minimap {
     this.#viewport = viewport;
 
     this.#canvas = document.createElement('canvas');
-    this.#canvas.className = 'erdp-minimap';
+    this.#canvas.className = 'erdv2-minimap';
     this.#canvas.width = this.#width;
     this.#canvas.height = this.#height;
     this.#ctx = this.#canvas.getContext('2d');
@@ -75,6 +75,7 @@ export class Minimap {
     ctx.fillRect(0, 0, w, h);
 
     // Entity dots
+    const selected = this.#state.selectedEntity;
     ctx.fillStyle = 'rgba(107, 197, 232, 0.7)';
     for (const [name, pos] of positions) {
       const size = entitySizes.get(name);
@@ -83,7 +84,11 @@ export class Minimap {
       const y = (pos.y - minY + pad) * scale;
       const ew = size.w * scale;
       const eh = size.h * scale;
+      if (name === selected) {
+        ctx.fillStyle = 'rgba(0, 120, 212, 0.9)';
+      }
       ctx.fillRect(x, y, Math.max(2, ew), Math.max(1, eh));
+      if (name === selected) ctx.fillStyle = 'rgba(107, 197, 232, 0.7)';
     }
 
     // Viewport rectangle

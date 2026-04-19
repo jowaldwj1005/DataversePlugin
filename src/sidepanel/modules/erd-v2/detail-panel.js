@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Entity detail sidebar
- * @module erd-pro/detail-panel
+ * ERD v2 — Entity detail sidebar
+ * @module erd-v2/detail-panel
  */
 
 export class DetailPanel {
@@ -15,7 +15,7 @@ export class DetailPanel {
     this.#cache = metadataCache;
 
     this.#panel = document.createElement('div');
-    this.#panel.className = 'erdp-detail';
+    this.#panel.className = 'erdv2-detail';
     this.#panel.style.display = 'none';
     container.appendChild(this.#panel);
   }
@@ -35,20 +35,20 @@ export class DetailPanel {
 
     // Header
     const header = document.createElement('div');
-    header.className = 'erdp-detail-header';
+    header.className = 'erdv2-detail-header';
 
     const title = document.createElement('h3');
-    title.className = 'erdp-detail-title';
+    title.className = 'erdv2-detail-title';
     title.textContent = displayName;
     header.appendChild(title);
 
     const logical = document.createElement('span');
-    logical.className = 'erdp-detail-logical';
+    logical.className = 'erdv2-detail-logical';
     logical.textContent = entityName;
     header.appendChild(logical);
 
     const closeBtn = document.createElement('button');
-    closeBtn.className = 'erdp-toolbar-btn';
+    closeBtn.className = 'erdv2-toolbar-btn';
     closeBtn.textContent = '✕';
     closeBtn.addEventListener('click', () => this.hide());
     header.appendChild(closeBtn);
@@ -57,7 +57,7 @@ export class DetailPanel {
 
     // Metadata badges
     const meta = document.createElement('div');
-    meta.className = 'erdp-detail-meta';
+    meta.className = 'erdv2-detail-meta';
     const badges = [
       ent.IsCustomEntity ? 'Custom' : 'System',
       ent.OwnershipType || '',
@@ -66,7 +66,7 @@ export class DetailPanel {
     ].filter(Boolean);
     for (const b of badges) {
       const badge = document.createElement('span');
-      badge.className = 'erdp-detail-badge';
+      badge.className = 'erdv2-detail-badge';
       badge.textContent = b;
       meta.appendChild(badge);
     }
@@ -75,29 +75,29 @@ export class DetailPanel {
     // Fields table
     if (allFields.length > 0) {
       const section = document.createElement('div');
-      section.className = 'erdp-detail-section';
+      section.className = 'erdv2-detail-section';
 
       const sectionTitle = document.createElement('h4');
       sectionTitle.textContent = 'Fields';
       section.appendChild(sectionTitle);
 
       const table = document.createElement('table');
-      table.className = 'erdp-detail-table';
+      table.className = 'erdv2-detail-table';
       for (const f of allFields) {
         const tr = document.createElement('tr');
         const tdName = document.createElement('td');
         tdName.textContent = f.displayName;
-        if (f.isPk) tdName.classList.add('erdp-detail-pk');
-        if (f.isLookup) tdName.classList.add('erdp-detail-fk');
+        if (f.isPk) tdName.classList.add('erdv2-detail-pk');
+        if (f.isLookup) tdName.classList.add('erdv2-detail-fk');
         tr.appendChild(tdName);
 
         const tdType = document.createElement('td');
-        tdType.className = 'erdp-detail-type';
+        tdType.className = 'erdv2-detail-type';
         tdType.textContent = f.type;
         tr.appendChild(tdType);
 
         const tdReq = document.createElement('td');
-        tdReq.className = 'erdp-detail-req';
+        tdReq.className = 'erdv2-detail-req';
         tdReq.textContent = f.required ? '*' : '';
         tr.appendChild(tdReq);
 
@@ -110,7 +110,7 @@ export class DetailPanel {
     // Relationships
     if (rels.length > 0) {
       const section = document.createElement('div');
-      section.className = 'erdp-detail-section';
+      section.className = 'erdv2-detail-section';
 
       const sectionTitle = document.createElement('h4');
       sectionTitle.textContent = 'Relationships';
@@ -118,12 +118,12 @@ export class DetailPanel {
 
       for (const rel of rels) {
         const div = document.createElement('div');
-        div.className = 'erdp-detail-rel';
+        div.className = 'erdv2-detail-rel';
         const direction = rel.sourceEntity === entityName ? '→' : '←';
         const other = rel.sourceEntity === entityName ? rel.targetEntity : rel.sourceEntity;
         div.textContent = `${rel.type} ${direction} ${other}`;
         const schema = document.createElement('span');
-        schema.className = 'erdp-detail-schema';
+        schema.className = 'erdv2-detail-schema';
         schema.textContent = ` (${rel.schemaName})`;
         div.appendChild(schema);
         section.appendChild(div);

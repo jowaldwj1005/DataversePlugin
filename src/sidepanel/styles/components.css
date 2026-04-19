@@ -4106,3 +4106,383 @@ details:not([open]) > .qb-raw-summary::before { content: '\25B8 '; }
   color: var(--color-text-muted);
   font-size: 0.68rem;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ERD v2 — Semantic Zoom Viewer
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Container */
+.erdv2-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.erdv2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+  flex-shrink: 0;
+  min-height: 32px;
+  flex-wrap: wrap;
+}
+
+.erdv2-toolbar-select {
+  padding: 3px 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  min-width: 120px;
+  max-width: 200px;
+}
+
+.erdv2-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.erdv2-toolbar-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.erdv2-toolbar-btn.erdv2-active {
+  background: var(--color-accent-primary);
+  color: var(--color-text-bright);
+}
+
+.erdv2-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+.erdv2-toolbar-search {
+  padding: 3px 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  width: 100px;
+  min-width: 70px;
+}
+.erdv2-toolbar-search:focus {
+  border-color: var(--color-border-focus);
+  outline: none;
+  width: 140px;
+  transition: width 0.15s ease;
+}
+
+/* Hint bar */
+.erdv2-hint {
+  padding: 4px 12px;
+  background: var(--color-info-bg);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.erdv2-hint-close {
+  float: right;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.erdv2-hint-close:hover { opacity: 1; }
+
+/* Zoom controls */
+.erdv2-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.erdv2-zoom-label {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  min-width: 32px;
+  text-align: center;
+  user-select: none;
+}
+
+/* Content area */
+.erdv2-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.erdv2-canvas-wrap {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: var(--color-bg-base);
+}
+
+.erdv2-svg {
+  display: block;
+  cursor: default;
+}
+
+/* Loading overlay */
+.erdv2-loading {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--color-text-bright);
+  font-size: 0.88rem;
+  z-index: 10;
+}
+
+/* Notification */
+.erdv2-notification {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.78rem;
+  z-index: 20;
+  pointer-events: none;
+}
+.erdv2-notification-info { background: var(--color-info-bg); color: var(--color-info); border: 1px solid var(--color-info-border); }
+.erdv2-notification-error { background: var(--color-error-bg); color: var(--color-error); border: 1px solid var(--color-error-border); }
+
+/* Minimap */
+.erdv2-minimap {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  z-index: 5;
+  opacity: 0.85;
+}
+.erdv2-minimap:hover { opacity: 1; }
+
+/* ── Field visibility toggle (zoom-based) ──────────────────────── */
+
+.erdv2-entities.erdv2-fields-hidden .erdv2-type-dot,
+.erdv2-entities.erdv2-fields-hidden .erdv2-key-icon,
+.erdv2-entities.erdv2-fields-hidden .erdv2-field-name,
+.erdv2-entities.erdv2-fields-hidden .erdv2-type-badge,
+.erdv2-entities.erdv2-fields-hidden .erdv2-required,
+.erdv2-entities.erdv2-fields-hidden .erdv2-field-count,
+.erdv2-entities.erdv2-fields-hidden .erdv2-header-divider {
+  display: none;
+}
+
+/* ── Entity card styles ────────────────────────────────────────── */
+
+.erdv2-card-bg {
+  fill: var(--erdv2-card-bg);
+  stroke: var(--erdv2-card-border);
+  stroke-width: 1;
+}
+.erdv2-header-system { fill: var(--erdv2-header-system); }
+.erdv2-header-custom { fill: var(--erdv2-header-custom); }
+.erdv2-header-divider { stroke: var(--erdv2-card-border); stroke-width: 0.5; }
+
+.erdv2-entity-name {
+  fill: var(--color-text-bright);
+  font-size: 16px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  dominant-baseline: hanging;
+}
+.erdv2-entity-logical {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  dominant-baseline: hanging;
+}
+
+/* Field type dots */
+.erdv2-type-dot { stroke: none; }
+.erdv2-type-dot[data-type="string"]    { fill: var(--erdv2-type-string); }
+.erdv2-type-dot[data-type="number"]    { fill: var(--erdv2-type-number); }
+.erdv2-type-dot[data-type="datetime"]  { fill: var(--erdv2-type-datetime); }
+.erdv2-type-dot[data-type="optionset"] { fill: var(--erdv2-type-optionset); }
+.erdv2-type-dot[data-type="boolean"]   { fill: var(--erdv2-type-boolean); }
+.erdv2-type-dot[data-type="lookup"]    { fill: var(--erdv2-type-lookup); }
+.erdv2-type-dot[data-type="uniqueid"]  { fill: var(--erdv2-type-uniqueid); }
+.erdv2-type-dot[data-type="image"]     { fill: var(--erdv2-type-image); }
+
+/* Field text */
+.erdv2-field-name {
+  fill: var(--color-text-primary);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  dominant-baseline: middle;
+}
+.erdv2-field-lookup { fill: var(--erdv2-type-lookup); }
+
+.erdv2-type-badge {
+  fill: var(--color-text-muted);
+  font-size: 9px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  dominant-baseline: middle;
+}
+.erdv2-required {
+  fill: var(--erdv2-required);
+  font-size: 11px;
+  font-weight: 700;
+  dominant-baseline: middle;
+}
+.erdv2-field-count {
+  fill: var(--color-text-muted);
+  font-size: 8px;
+  font-style: italic;
+  dominant-baseline: auto;
+}
+.erdv2-key-icon { font-size: 8px; dominant-baseline: middle; }
+
+/* ── Edge paths ────────────────────────────────────────────────── */
+
+.erdv2-edge-path {
+  opacity: 0.65;
+  transition: opacity var(--transition-normal), stroke-width var(--transition-normal);
+}
+.erdv2-edge.erdv2-highlighted .erdv2-edge-path { opacity: 1; stroke-width: 2.5; }
+.erdv2-edge.erdv2-faded .erdv2-edge-path { opacity: 0.08; }
+
+/* ── Entity highlight / fade / focus ───────────────────────────── */
+
+.erdv2-entity {
+  transition: opacity 0.15s ease;
+  cursor: grab;
+}
+.erdv2-entity.erdv2-highlighted .erdv2-card-bg {
+  stroke: var(--color-accent-primary);
+  stroke-width: 2;
+}
+.erdv2-entity.erdv2-faded { opacity: 0.15; }
+
+/* ── Export menu ───────────────────────────────────────────────── */
+
+.erdv2-export-menu {
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  background: var(--color-bg-dropdown);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-dropdown);
+  min-width: 160px;
+}
+.erdv2-export-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.erdv2-export-menu-item:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ── Detail panel ──────────────────────────────────────────────── */
+
+.erdv2-detail {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 260px;
+  background: var(--color-bg-sidebar);
+  border-left: 1px solid var(--color-border);
+  overflow-y: auto;
+  z-index: 5;
+  padding: 12px;
+}
+.erdv2-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.erdv2-detail-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--color-text-bright);
+  flex: 1;
+}
+.erdv2-detail-logical {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  width: 100%;
+}
+.erdv2-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.erdv2-detail-badge {
+  padding: 1px 6px;
+  background: var(--color-bg-badge);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+.erdv2-detail-section { margin-bottom: 12px; }
+.erdv2-detail-section h4 {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.erdv2-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.erdv2-detail-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+.erdv2-detail-pk { font-weight: 700; }
+.erdv2-detail-fk { color: var(--erdv2-type-lookup); }
+.erdv2-detail-type { color: var(--color-text-muted); text-align: right; }
+.erdv2-detail-req { color: var(--erdv2-required); font-weight: 700; width: 12px; }
+.erdv2-detail-rel {
+  font-size: 0.75rem;
+  color: var(--color-text-primary);
+  padding: 3px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.erdv2-detail-schema {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+}

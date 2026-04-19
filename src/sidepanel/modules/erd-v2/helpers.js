@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Pure utility functions
- * @module erd-pro/helpers
+ * ERD v2 — Pure utility functions
+ * @module erd-v2/helpers
  */
 
 import { SVG_NS, HEADER_H, FIELD_H, FIELD_PAD, SYSTEM_NOISE_NAMES, SYSTEM_FIELD_NAMES, SYSTEM_ATTR_TYPES } from './constants.js';

@@ -1,16 +1,19 @@
 /**
- * ERD Pro — Incremental SVG renderer
+ * ERD v2 — SVG renderer (full entity cards, field visibility toggle)
  *
- * Renders entity boxes and relationship edges as SVG elements.
- * Supports incremental updates: only changed elements are rebuilt.
+ * Always renders entities as full cards with fields.
+ * Field visibility toggled via CSS class based on zoom threshold.
+ * No pill/compact/full switching — one rendering path.
  *
- * @module erd-pro/svg-renderer
+ * @module erd-v2/svg-renderer
  */
 
-import { SVG_NS, ENTITY_W, HEADER_H, FIELD_H, FIELD_PAD, CORNER_R, MAX_KEY_FIELDS, ARROW_COLORS } from './constants.js';
-import { svgEl, attrTypeShort } from './helpers.js';
+import {
+  SVG_NS, ENTITY_W, HEADER_H, FIELD_H, FIELD_PAD, CORNER_R, MAX_KEY_FIELDS,
+  ARROW_COLORS,
+} from './constants.js';
+import { svgEl, attrTypeShort, entityHeight } from './helpers.js';
 
-/** Map of attribute types to CSS custom property suffixes. */
 const TYPE_COLORS = {
   String: 'string', Memo: 'string',
   Integer: 'number', BigInt: 'number', Decimal: 'number', Double: 'number', Money: 'number',
@@ -26,6 +29,7 @@ export class SvgRenderer {
   #state;
   #entityEls = new Map();
   #edgeEls = new Map();
+  #entityColorMap = new Map();  // entityName → color (for edges)
   #edgeLayer;
   #entityLayer;
   #defs;
@@ -45,28 +49,34 @@ export class SvgRenderer {
     this.#entityEls.clear();
     this.#edgeEls.clear();
 
-    // Defs (markers, shadow)
+    // Build entity → color map: each parent entity gets a consistent color
+    this.#buildEntityColorMap();
+
     this.#defs = this.#createDefs();
     this.#svgRoot.appendChild(this.#defs);
 
-    // Edge layer (below entities)
-    this.#edgeLayer = svgEl('g', { class: 'erdp-edges' });
+    this.#edgeLayer = svgEl('g', { class: 'erdv2-edges' });
     this.#svgRoot.appendChild(this.#edgeLayer);
 
-    // Entity layer
-    this.#entityLayer = svgEl('g', { class: 'erdp-entities' });
+    this.#entityLayer = svgEl('g', { class: 'erdv2-entities' });
     this.#svgRoot.appendChild(this.#entityLayer);
 
-    // Draw edges
     for (const [schema, pathD] of this.#state.edgePaths) {
       this.#renderEdge(schema, pathD);
     }
 
-    // Draw entities
     for (const ent of this.#state.entities) {
       this.#renderEntity(ent);
     }
   }
+
+  // =========================================================================
+  // Field visibility (no-op — fields always visible, zoom handles readability)
+  // =========================================================================
+
+  /** No-op: fields are always rendered. At low zoom they're too small to read
+   *  but the card shape stays correct. This matches dbdiagram.io / draw.io behavior. */
+  setFieldsVisible(_visible) { /* intentional no-op */ }
 
   // =========================================================================
   // Incremental updates
@@ -110,49 +120,41 @@ export class SvgRenderer {
     const adj = this.#state.adjacency.get(entityName) || new Set();
 
     for (const [name, g] of this.#entityEls) {
-      if (name === entityName) {
-        g.classList.add('erdp-highlighted');
-        g.classList.remove('erdp-faded');
-      } else if (adj.has(name)) {
-        g.classList.add('erdp-highlighted');
-        g.classList.remove('erdp-faded');
+      if (name === entityName || adj.has(name)) {
+        g.classList.add('erdv2-highlighted');
+        g.classList.remove('erdv2-faded');
       } else {
-        g.classList.add('erdp-faded');
-        g.classList.remove('erdp-highlighted');
+        g.classList.add('erdv2-faded');
+        g.classList.remove('erdv2-highlighted');
       }
     }
 
     for (const [schema, g] of this.#edgeEls) {
       const rel = this.#state.relationships.find(r => r.schemaName === schema);
       if (rel && (rel.sourceEntity === entityName || rel.targetEntity === entityName)) {
-        g.classList.add('erdp-highlighted');
-        g.classList.remove('erdp-faded');
+        g.classList.add('erdv2-highlighted');
+        g.classList.remove('erdv2-faded');
       } else {
-        g.classList.add('erdp-faded');
-        g.classList.remove('erdp-highlighted');
+        g.classList.add('erdv2-faded');
+        g.classList.remove('erdv2-highlighted');
       }
     }
   }
 
   clearHighlight() {
     for (const g of this.#entityEls.values()) {
-      g.classList.remove('erdp-highlighted', 'erdp-faded');
+      g.classList.remove('erdv2-highlighted', 'erdv2-faded');
     }
     for (const g of this.#edgeEls.values()) {
-      g.classList.remove('erdp-highlighted', 'erdp-faded');
+      g.classList.remove('erdv2-highlighted', 'erdv2-faded');
     }
   }
 
-  /** Get the SVG <g> element for an entity (for interaction binding). */
-  getEntityEl(name) {
-    return this.#entityEls.get(name);
-  }
-
-  /** Get the root SVG group. */
+  getEntityEl(name) { return this.#entityEls.get(name); }
   get root() { return this.#svgRoot; }
 
   // =========================================================================
-  // Entity rendering
+  // Entity rendering (always full card)
   // =========================================================================
 
   #renderEntity(ent) {
@@ -163,54 +165,58 @@ export class SvgRenderer {
     const fields = this.#getVisibleFields(name);
     const size = this.#state.entitySizes.get(name);
     const w = size?.w || ENTITY_W;
-    const h = size?.h || 60;
+    const h = size?.h || entityHeight(fields.length);
     const isCustom = ent.IsCustomEntity;
 
     const g = svgEl('g', {
-      class: 'erdp-entity',
+      class: 'erdv2-entity',
       transform: `translate(${pos.x}, ${pos.y})`,
       'data-entity': name,
     });
 
     // Background rect with shadow
     g.appendChild(svgEl('rect', {
-      class: 'erdp-card-bg',
+      class: 'erdv2-card-bg',
       width: w, height: h, rx: CORNER_R,
-      filter: 'url(#erdp-shadow)',
+      filter: 'url(#erdv2-shadow)',
     }));
 
     // Header background
     g.appendChild(svgEl('rect', {
-      class: isCustom ? 'erdp-header-custom' : 'erdp-header-system',
+      class: isCustom ? 'erdv2-header-custom' : 'erdv2-header-system',
       width: w, height: HEADER_H, rx: CORNER_R,
     }));
-    // Cover bottom corners of header
     g.appendChild(svgEl('rect', {
-      class: isCustom ? 'erdp-header-custom' : 'erdp-header-system',
+      class: isCustom ? 'erdv2-header-custom' : 'erdv2-header-system',
       y: HEADER_H - CORNER_R, width: w, height: CORNER_R,
     }));
 
     // Entity display name
     const displayName = ent.DisplayName?.UserLocalizedLabel?.Label || name;
     const nameText = svgEl('text', {
-      class: 'erdp-entity-name',
-      x: 10, y: 13,
+      class: 'erdv2-entity-name',
+      x: 10, y: 6,
+      'font-size': '16',
+      'font-weight': '700',
+      'dominant-baseline': 'hanging',
     });
     nameText.textContent = displayName;
     g.appendChild(nameText);
 
-    // Logical name (smaller, monospace)
+    // Logical name
     const logicalText = svgEl('text', {
-      class: 'erdp-entity-logical',
-      x: 10, y: 26,
+      class: 'erdv2-entity-logical',
+      x: 10, y: 25,
+      'font-size': '11',
+      'dominant-baseline': 'hanging',
     });
     logicalText.textContent = name;
     g.appendChild(logicalText);
 
-    // Header divider line
+    // Header divider
     g.appendChild(svgEl('line', {
       x1: 0, y1: HEADER_H, x2: w, y2: HEADER_H,
-      class: 'erdp-header-divider',
+      class: 'erdv2-header-divider',
     }));
 
     // Fields
@@ -221,18 +227,15 @@ export class SvgRenderer {
     }
 
     // Field count badge if capped
-    const preset = this.#state.preset;
-    if (preset !== 'overview' && preset !== 'detailed') {
-      const total = this.#getUncappedFieldCount(name);
-      if (total > fields.length) {
-        const badge = svgEl('text', {
-          class: 'erdp-field-count',
-          x: w - 8, y: h - 6,
-          'text-anchor': 'end',
-        });
-        badge.textContent = `+${total - fields.length} more`;
-        g.appendChild(badge);
-      }
+    const total = this.#getUncappedFieldCount(name);
+    if (total > fields.length) {
+      const badge = svgEl('text', {
+        class: 'erdv2-field-count',
+        x: w - 8, y: h - 6,
+        'text-anchor': 'end',
+      });
+      badge.textContent = `+${total - fields.length} more`;
+      g.appendChild(badge);
     }
 
     this.#entityLayer.appendChild(g);
@@ -240,47 +243,42 @@ export class SvgRenderer {
   }
 
   #renderField(g, field, y, w) {
-    // Type indicator dot
     const typeKey = TYPE_COLORS[field.type] || 'string';
     g.appendChild(svgEl('circle', {
-      class: 'erdp-type-dot',
+      class: 'erdv2-type-dot',
       'data-type': typeKey,
       cx: 14, cy: y + FIELD_H / 2, r: 3,
     }));
 
-    // PK/FK icon
     if (field.isPk) {
-      const icon = svgEl('text', { class: 'erdp-key-icon erdp-key-pk', x: 23, y: y + FIELD_H / 2 + 1 });
-      icon.textContent = '🔑';
+      const icon = svgEl('text', { class: 'erdv2-key-icon erdv2-key-pk', x: 23, y: y + FIELD_H / 2 + 1 });
+      icon.textContent = '\u{1F511}';
       g.appendChild(icon);
     } else if (field.isLookup) {
-      const icon = svgEl('text', { class: 'erdp-key-icon erdp-key-fk', x: 23, y: y + FIELD_H / 2 + 1 });
-      icon.textContent = '🔗';
+      const icon = svgEl('text', { class: 'erdv2-key-icon erdv2-key-fk', x: 23, y: y + FIELD_H / 2 + 1 });
+      icon.textContent = '\u{1F517}';
       g.appendChild(icon);
     }
 
-    // Field name
     const textX = field.isPk || field.isLookup ? 36 : 24;
     const nameEl = svgEl('text', {
-      class: field.isLookup ? 'erdp-field-name erdp-field-lookup' : 'erdp-field-name',
+      class: field.isLookup ? 'erdv2-field-name erdv2-field-lookup' : 'erdv2-field-name',
       x: textX, y: y + FIELD_H / 2 + 1,
     });
     nameEl.textContent = field.displayName;
     g.appendChild(nameEl);
 
-    // Type badge
     const badge = svgEl('text', {
-      class: 'erdp-type-badge',
+      class: 'erdv2-type-badge',
       x: w - 8, y: y + FIELD_H / 2 + 1,
       'text-anchor': 'end',
     });
     badge.textContent = attrTypeShort(field.type);
     g.appendChild(badge);
 
-    // Required indicator
     if (field.required) {
       const req = svgEl('text', {
-        class: 'erdp-required',
+        class: 'erdv2-required',
         x: w - 28, y: y + FIELD_H / 2 + 1,
         'text-anchor': 'end',
       });
@@ -298,63 +296,62 @@ export class SvgRenderer {
     const rel = this.#state.relationships.find(r => r.schemaName === schema);
     if (!rel) return;
 
-    const colorIdx = this.#state.relationships.indexOf(rel) % ARROW_COLORS.length;
-    const color = ARROW_COLORS[colorIdx];
+    // Color by source (parent) entity — all children of the same parent share one color
+    const color = this.#entityColorMap.get(rel.sourceEntity) || ARROW_COLORS[0];
 
     const g = svgEl('g', {
-      class: `erdp-edge${rel.type === 'N:N' ? ' erdp-edge-nn' : ' erdp-edge-1n'}`,
+      class: `erdv2-edge${rel.type === 'N:N' ? ' erdv2-edge-nn' : ' erdv2-edge-1n'}`,
       'data-schema': schema,
     });
 
     const path = svgEl('path', {
       d: pathD,
-      class: 'erdp-edge-path',
+      class: 'erdv2-edge-path',
       stroke: color,
       fill: 'none',
       'stroke-width': '1.8',
     });
 
-    // Crow's foot markers
     if (rel.type === '1:N') {
-      path.setAttribute('marker-start', 'url(#erdp-cf-one-one)');
-      path.setAttribute('marker-end', 'url(#erdp-cf-many)');
+      path.setAttribute('marker-start', 'url(#erdv2-cf-one-one)');
+      path.setAttribute('marker-end', 'url(#erdv2-cf-many)');
     } else if (rel.type === 'N:N') {
-      path.setAttribute('marker-start', 'url(#erdp-cf-many)');
-      path.setAttribute('marker-end', 'url(#erdp-cf-many)');
+      path.setAttribute('marker-start', 'url(#erdv2-cf-many)');
+      path.setAttribute('marker-end', 'url(#erdv2-cf-many)');
       path.setAttribute('stroke-dasharray', '6 3');
     }
 
     g.appendChild(path);
 
-    // Tooltip on hover
     const title = svgEl('title');
-    title.textContent = `${rel.type}: ${rel.sourceEntity} → ${rel.targetEntity}\n${rel.schemaName}`;
+    title.textContent = `${rel.type}: ${rel.sourceEntity} \u2192 ${rel.targetEntity}\n${rel.schemaName}`;
     g.appendChild(title);
 
     this.#edgeLayer.appendChild(g);
     this.#edgeEls.set(schema, g);
   }
 
+  /** No-op — crows foot markers are always visible. */
+  setEdgeStyle(_showMarkers) { /* intentional no-op */ }
+
   // =========================================================================
-  // SVG defs (markers, filters)
+  // SVG defs
   // =========================================================================
 
   #createDefs() {
     const defs = svgEl('defs');
     const strokeColor = 'var(--color-border-strong,#555)';
 
-    // "One-one" marker ||
     const oneOne = svgEl('marker', {
-      id: 'erdp-cf-one-one', markerWidth: '16', markerHeight: '12',
+      id: 'erdv2-cf-one-one', markerWidth: '16', markerHeight: '12',
       refX: '14', refY: '6', orient: 'auto', markerUnits: 'strokeWidth',
     });
     oneOne.appendChild(svgEl('line', { x1: '12', y1: '2', x2: '12', y2: '10', stroke: strokeColor, 'stroke-width': '1.5' }));
     oneOne.appendChild(svgEl('line', { x1: '8', y1: '2', x2: '8', y2: '10', stroke: strokeColor, 'stroke-width': '1.5' }));
     defs.appendChild(oneOne);
 
-    // "Many" marker ><
     const many = svgEl('marker', {
-      id: 'erdp-cf-many', markerWidth: '14', markerHeight: '14',
+      id: 'erdv2-cf-many', markerWidth: '14', markerHeight: '14',
       refX: '12', refY: '7', orient: 'auto', markerUnits: 'strokeWidth',
     });
     many.appendChild(svgEl('line', { x1: '12', y1: '7', x2: '2', y2: '2', stroke: strokeColor, 'stroke-width': '1.5' }));
@@ -362,16 +359,14 @@ export class SvgRenderer {
     many.appendChild(svgEl('line', { x1: '12', y1: '7', x2: '2', y2: '12', stroke: strokeColor, 'stroke-width': '1.5' }));
     defs.appendChild(many);
 
-    // "One" marker |
     const one = svgEl('marker', {
-      id: 'erdp-cf-one', markerWidth: '12', markerHeight: '12',
+      id: 'erdv2-cf-one', markerWidth: '12', markerHeight: '12',
       refX: '10', refY: '6', orient: 'auto', markerUnits: 'strokeWidth',
     });
     one.appendChild(svgEl('line', { x1: '8', y1: '2', x2: '8', y2: '10', stroke: strokeColor, 'stroke-width': '1.5' }));
     defs.appendChild(one);
 
-    // Drop shadow
-    const shadow = svgEl('filter', { id: 'erdp-shadow', x: '-5%', y: '-5%', width: '115%', height: '120%' });
+    const shadow = svgEl('filter', { id: 'erdv2-shadow', x: '-5%', y: '-5%', width: '115%', height: '120%' });
     shadow.appendChild(svgEl('feDropShadow', {
       dx: '0', dy: '2', stdDeviation: '3',
       'flood-color': '#000', 'flood-opacity': '0.15',
@@ -386,9 +381,6 @@ export class SvgRenderer {
   // =========================================================================
 
   #getVisibleFields(entityName) {
-    const preset = this.#state.preset;
-    if (preset === 'overview') return [];
-
     const isExpanded = this.#state.expanded.get(entityName) === true;
     const allFields = isExpanded
       ? (this.#state.entityAllFields.get(entityName) || [])
@@ -405,5 +397,29 @@ export class SvgRenderer {
   #getUncappedFieldCount(entityName) {
     const allFields = this.#state.entityKeyFields.get(entityName) || [];
     return allFields.filter(f => f.isPk || !this.#state.hiddenSystemFields.has(f.name)).length;
+  }
+
+  /**
+   * Build a color map: each entity that is a source (parent) in any 1:N
+   * relationship gets a unique color. All edges from that parent share it.
+   */
+  #buildEntityColorMap() {
+    this.#entityColorMap.clear();
+    const parents = new Set();
+    for (const rel of this.#state.relationships) {
+      if (rel.type === '1:N') parents.add(rel.sourceEntity);
+    }
+    let idx = 0;
+    for (const parent of parents) {
+      this.#entityColorMap.set(parent, ARROW_COLORS[idx % ARROW_COLORS.length]);
+      idx++;
+    }
+    // N:N relationships — use the first entity's color or fallback
+    for (const rel of this.#state.relationships) {
+      if (rel.type === 'N:N' && !this.#entityColorMap.has(rel.sourceEntity)) {
+        this.#entityColorMap.set(rel.sourceEntity, ARROW_COLORS[idx % ARROW_COLORS.length]);
+        idx++;
+      }
+    }
   }
 }

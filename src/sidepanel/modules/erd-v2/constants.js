@@ -1,24 +1,24 @@
 /**
- * ERD Pro — Shared constants
- * @module erd-pro/constants
+ * ERD v2 — Shared constants
+ * @module erd-v2/constants
  */
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Entity box dimensions
+// ── Entity card dimensions ──────────────────────────────────────────────
+
 export const ENTITY_W = 220;
-export const HEADER_H = 34;
+export const HEADER_H = 42;
 export const FIELD_H = 20;
 export const FIELD_PAD = 6;
 export const CORNER_R = 6;
 export const MAX_KEY_FIELDS = 15;
 
-// Layout gaps
-export const H_GAP = 120;
-export const V_GAP = 80;
-export const COL_SIZE = 4;
+// Zoom threshold: below this, field rows are hidden (header-only cards)
+export const ZOOM_THRESHOLD_FIELDS = 0.5;
 
-// Channel router
+// ── Channel router ─────────────────────────────────────────────────────
+
 export const STUB_LEN = 25;
 export const LANE_STEP = 8;
 export const PORT_MARGIN = 12;
@@ -27,7 +27,7 @@ export const PATH_CORNER_R = 5;
 export const BUMP_R = 4;
 export const MIN_CHANNEL = 40;
 
-// Arrow color palette — harmonious hues, theme-agnostic via CSS vars preferred
+// Arrow color palette
 export const ARROW_COLORS = [
   '#6bc5e8', '#a78bfa', '#f9a857', '#4ade80', '#f472b6',
   '#e879a0', '#60d5c4', '#c4b5fd', '#facc15', '#93c5fd',

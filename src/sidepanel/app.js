@@ -46,7 +46,7 @@ const ALL_TABS = Object.freeze([
   { id: 'security', label: 'Security', icon: '\uD83D\uDD12', tip: 'Role privileges, user permissions, field-level security' },
   { id: 'erd', label: 'ERD', icon: '\uD83D\uDDFA\uFE0F', tip: 'Entity-relationship diagrams for any solution' },
   { id: 'bulk', label: 'Bulk Ops', icon: '\uD83D\uDCE6', tip: 'Batch operations: create, update, delete, assign, export/import' },
-  { id: 'erdpro', label: 'ERD Pro', icon: '\uD83D\uDCD0', tip: 'Documentation-grade ERD with channel routing and print-ready export' },
+  { id: 'erdv2', label: 'ERD v2', icon: '\uD83D\uDCD0', tip: 'Semantic zoom ERD with focus navigation' },
   { id: 'toolbuilder', label: 'Tools', icon: '\uD83E\uDDE9', tip: 'Generate AI tool schemas (Claude/OpenAI/MCP) from entity metadata' },
   { id: 'formtools', label: 'Form', icon: '\uD83D\uDCCB', tip: 'Inspect and interact with the current form context' },
   { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F', tip: 'Theme, cache, AI provider configuration' },
@@ -254,6 +254,14 @@ class DataverseToolkit {
     // AI-first: default to Agent tab when AI is configured
     const hasAi = this._settings.aiProvider && this._settings.aiApiKey;
     this._activeTab = hasAi ? 'aicustomizer' : 'explorer';
+    // Check URL params (pop-out windows pass tab + context)
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlTab = urlParams.get('tab');
+      if (urlTab && ALL_TABS.some(t => t.id === urlTab)) {
+        this._activeTab = urlTab;
+      }
+    } catch { /* ignore */ }
     // Restore sidebar pin state
     try {
       const r = await chrome.storage.local.get(STORAGE_KEY_SIDEBAR);
@@ -448,7 +456,7 @@ class DataverseToolkit {
       secondary: hasAi
         ? ['request', 'security', 'erd']
         : ['security', 'erd', 'aicustomizer'],
-      tertiary: ['bulk', 'erdpro', 'toolbuilder', 'formtools'],
+      tertiary: ['bulk', 'erdv2', 'toolbuilder', 'formtools'],
       pinned: ['settings'],
     };
   }
@@ -821,9 +829,9 @@ class DataverseToolkit {
           break;
         }
 
-        case 'erdpro': {
-          const { default: ErdPro } = await import('./modules/erd-pro.js');
-          const module = new ErdPro(container, this.api, this.cache);
+        case 'erdv2': {
+          const { default: ErdV2 } = await import('./modules/erd-v2.js');
+          const module = new ErdV2(container, this.api, this.cache);
           module.render();
           this._modules[tabId] = module;
           break;

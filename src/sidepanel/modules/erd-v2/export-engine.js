@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Export engine (SVG, PNG) with title block and legend
- * @module erd-pro/export-engine
+ * ERD v2 — Export engine (SVG, PNG) with title block and legend
+ * @module erd-v2/export-engine
  */
 
 import { SVG_NS, ENTITY_W } from './constants.js';
@@ -18,11 +18,11 @@ export class ExportEngine {
   /** Show export options and trigger download. */
   async showExportMenu(container) {
     // Simple dropdown menu
-    const existing = container.querySelector('.erdp-export-menu');
+    const existing = container.querySelector('.erdv2-export-menu');
     if (existing) { existing.remove(); return; }
 
     const menu = document.createElement('div');
-    menu.className = 'erdp-export-menu';
+    menu.className = 'erdv2-export-menu';
 
     const items = [
       { label: 'Export SVG', action: () => this.exportSVG() },
@@ -32,7 +32,7 @@ export class ExportEngine {
 
     for (const item of items) {
       const btn = document.createElement('button');
-      btn.className = 'erdp-export-menu-item';
+      btn.className = 'erdv2-export-menu-item';
       btn.textContent = item.label;
       btn.addEventListener('click', () => { menu.remove(); item.action(); });
       menu.appendChild(btn);
@@ -94,9 +94,9 @@ export class ExportEngine {
   // =========================================================================
 
   #buildExportSVG() {
-    const { positions, entitySizes } = this.#state;
+    const { positions, entitySizes, edgePaths } = this.#state;
 
-    // Calculate content bounds
+    // Calculate content bounds from entities
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const [name, pos] of positions) {
       const size = entitySizes.get(name);
@@ -106,6 +106,32 @@ export class ExportEngine {
       maxX = Math.max(maxX, pos.x + size.w);
       maxY = Math.max(maxY, pos.y + size.h);
     }
+
+    // Include edge path bounding boxes (fixes clipping of edges/markers)
+    try {
+      const svgRoot = this.#svg.querySelector('[id]') || this.#svg.firstElementChild;
+      if (svgRoot) {
+        for (const [, pathD] of edgePaths) {
+          if (!pathD) continue;
+          const tempPath = document.createElementNS(SVG_NS, 'path');
+          tempPath.setAttribute('d', pathD);
+          svgRoot.appendChild(tempPath);
+          const bbox = tempPath.getBBox();
+          svgRoot.removeChild(tempPath);
+          minX = Math.min(minX, bbox.x);
+          minY = Math.min(minY, bbox.y);
+          maxX = Math.max(maxX, bbox.x + bbox.width);
+          maxY = Math.max(maxY, bbox.y + bbox.height);
+        }
+      }
+    } catch { /* getBBox may fail on detached SVG */ }
+
+    // Add marker margin to prevent crow's foot clipping
+    const markerMargin = 16;
+    minX -= markerMargin;
+    minY -= markerMargin;
+    maxX += markerMargin;
+    maxY += markerMargin;
 
     const pad = 40;
     const titleBlockH = 70;
@@ -157,7 +183,7 @@ export class ExportEngine {
 
   #addTitleBlock(svg, width, pad) {
     const g = document.createElementNS(SVG_NS, 'g');
-    g.setAttribute('class', 'erdp-title-block');
+    g.setAttribute('class', 'erdv2-title-block');
 
     const textColor = cssVar('--color-text-bright') || '#ffffff';
     const mutedColor = cssVar('--color-text-muted') || '#808080';

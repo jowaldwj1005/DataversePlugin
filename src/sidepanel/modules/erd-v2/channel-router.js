@@ -1,5 +1,5 @@
 /**
- * ERD Pro — Channel-based orthogonal edge router
+ * ERD v2 — Channel-based orthogonal edge router
  *
  * Routes edges through horizontal channels between hierarchy layers and
  * vertical channels between entity columns. No pathfinding (A*) needed.
@@ -7,7 +7,7 @@
  * All lines are strictly horizontal or vertical with 90° rounded corners.
  * Lane assignment is integrated — parallel edges are automatically spaced.
  *
- * @module erd-pro/channel-router
+ * @module erd-v2/channel-router
  */
 
 import { ENTITY_W, STUB_LEN, LANE_STEP, PORT_MARGIN, PATH_CORNER_R, BUMP_R, ROUTE_MARGIN } from './constants.js';
@@ -21,12 +21,36 @@ export class ChannelRouter {
   }
 
   /**
-   * Full routing pipeline. Call after layout is done.
+   * Full routing pipeline (for full detail level). Call after layout is done.
    * Updates state.hTracks, state.vTracks, state.edgePaths.
    */
   computeAll() {
     this.#computeTracks();
     this.#routeAllEdges();
+  }
+
+  /**
+   * Simple straight-line routing (for zoomed-out view).
+   * Edges connect entity centers with a single line segment.
+   */
+  computeSimple() {
+    const { positions, entitySizes, relationships, edgePaths } = this.#state;
+    edgePaths.clear();
+
+    for (const rel of relationships) {
+      const srcPos = positions.get(rel.sourceEntity);
+      const tgtPos = positions.get(rel.targetEntity);
+      const srcSize = entitySizes.get(rel.sourceEntity);
+      const tgtSize = entitySizes.get(rel.targetEntity);
+      if (!srcPos || !tgtPos || !srcSize || !tgtSize) continue;
+
+      const sx = srcPos.x + srcSize.w / 2;
+      const sy = srcPos.y + srcSize.h / 2;
+      const tx = tgtPos.x + tgtSize.w / 2;
+      const ty = tgtPos.y + tgtSize.h / 2;
+
+      edgePaths.set(rel.schemaName, `M ${sx} ${sy} L ${tx} ${ty}`);
+    }
   }
 
   /**

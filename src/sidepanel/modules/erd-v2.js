@@ -1,28 +1,28 @@
 /**
- * ERD Pro — Documentation-grade Entity Relationship Diagram
+ * ERD v2 — Dagre-powered Entity Relationship Diagram
  *
- * Orchestrator module: wires together state, data loading, layout,
- * channel routing, SVG rendering, viewport, and interactions.
+ * Uses @dagrejs/dagre for proper hierarchical layout with actual entity sizes.
+ * Always renders full entity cards; field visibility toggled by zoom.
+ * Single-click select + detail panel. No focus mode.
  *
- * @module ErdPro
+ * @module ErdV2
  */
 
-import { ErdState } from './erd-pro/state.js';
-import { DataLoader } from './erd-pro/data-loader.js';
-import { LayoutEngine } from './erd-pro/layout-engine.js';
-import { ChannelRouter } from './erd-pro/channel-router.js';
-import { SvgRenderer } from './erd-pro/svg-renderer.js';
-import { Viewport } from './erd-pro/viewport.js';
-import { Minimap } from './erd-pro/minimap.js';
-import { InteractionManager } from './erd-pro/interaction.js';
-import { Toolbar } from './erd-pro/toolbar.js';
-import { ExportEngine } from './erd-pro/export-engine.js';
-import { DetailPanel } from './erd-pro/detail-panel.js';
-import { FocusMode } from './erd-pro/focus-mode.js';
-import { SVG_NS } from './erd-pro/constants.js';
-import { svgEl, entityHeight } from './erd-pro/helpers.js';
+import { ErdState } from './erd-v2/state.js';
+import { DataLoader } from './erd-v2/data-loader.js';
+import { LayoutEngine } from './erd-v2/layout-engine.js';
+import { ChannelRouter } from './erd-v2/channel-router.js';
+import { SvgRenderer } from './erd-v2/svg-renderer.js';
+import { Viewport } from './erd-v2/viewport.js';
+import { Minimap } from './erd-v2/minimap.js';
+import { InteractionManager } from './erd-v2/interaction.js';
+import { Toolbar } from './erd-v2/toolbar.js';
+import { ExportEngine } from './erd-v2/export-engine.js';
+import { DetailPanel } from './erd-v2/detail-panel.js';
+import { SVG_NS, ZOOM_THRESHOLD_FIELDS } from './erd-v2/constants.js';
+import { svgEl } from './erd-v2/helpers.js';
 
-export default class ErdPro {
+export default class ErdV2 {
   #container;
   #api;
   #cache;
@@ -37,7 +37,6 @@ export default class ErdPro {
   #toolbar;
   #exporter;
   #detailPanel;
-  #focusMode;
   #svg;
   #svgRoot;
   #canvasWrap;
@@ -61,7 +60,7 @@ export default class ErdPro {
 
   async render() {
     this.#container.innerHTML = '';
-    this.#container.classList.add('erdp-container');
+    this.#container.classList.add('erdv2-container');
 
     // Toolbar
     this.#toolbar = new Toolbar(this.#container, this.#state, {
@@ -72,33 +71,35 @@ export default class ErdPro {
 
     // Content area
     const content = document.createElement('div');
-    content.className = 'erdp-content';
+    content.className = 'erdv2-content';
     this.#container.appendChild(content);
 
-    // SVG canvas wrapper
+    // SVG canvas
     this.#canvasWrap = document.createElement('div');
-    this.#canvasWrap.className = 'erdp-canvas-wrap';
+    this.#canvasWrap.className = 'erdv2-canvas-wrap';
     content.appendChild(this.#canvasWrap);
 
-    // SVG element
     this.#svg = document.createElementNS(SVG_NS, 'svg');
-    this.#svg.setAttribute('class', 'erdp-svg');
+    this.#svg.setAttribute('class', 'erdv2-svg');
     this.#svg.setAttribute('width', '100%');
     this.#svg.setAttribute('height', '100%');
     this.#canvasWrap.appendChild(this.#svg);
 
-    // SVG root group (pan/zoom target)
-    this.#svgRoot = svgEl('g', { id: 'erdp-root' });
+    this.#svgRoot = svgEl('g', { id: 'erdv2-root' });
     this.#svg.appendChild(this.#svgRoot);
 
     // Renderer
     this.#renderer = new SvgRenderer(this.#svgRoot, this.#state);
 
-    // Viewport (pan/zoom)
-    this.#viewport = new Viewport(this.#svg, this.#svgRoot, this.#state, this.#renderer, () => {
-      this.#minimap?.requestRender();
-      this.#toolbar?.updateZoom(this.#state.zoom);
-    });
+    // Viewport
+    this.#viewport = new Viewport(
+      this.#svg, this.#svgRoot, this.#state, this.#renderer,
+      () => {
+        this.#minimap?.requestRender();
+        this.#toolbar?.updateZoom(this.#state.zoom);
+      },
+      (fieldsVisible) => this.#onFieldsToggle(fieldsVisible),
+    );
     this.#viewport.setup();
 
     // Minimap
@@ -112,17 +113,17 @@ export default class ErdPro {
 
     // Loading overlay
     this.#loadingEl = document.createElement('div');
-    this.#loadingEl.className = 'erdp-loading';
+    this.#loadingEl.className = 'erdv2-loading';
     this.#loadingEl.style.display = 'none';
     this.#canvasWrap.appendChild(this.#loadingEl);
 
     // Notification
     this.#notificationEl = document.createElement('div');
-    this.#notificationEl.className = 'erdp-notification';
+    this.#notificationEl.className = 'erdv2-notification';
     this.#notificationEl.style.display = 'none';
     this.#container.appendChild(this.#notificationEl);
 
-    // Wire state subscriptions
+    // Wire subscriptions
     this.#wireSubscriptions();
 
     // Load solutions
@@ -130,9 +131,12 @@ export default class ErdPro {
       const solutions = await this.#loader.loadSolutions();
       this.#toolbar.setSolutions(solutions);
 
-      // Auto-load last solution
-      const stored = await chrome.storage?.local?.get('erdpro_lastSolution');
-      const lastSol = stored?.erdpro_lastSolution;
+      // Check URL param first (pop-out window), then storage
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlSol = urlParams.get('solution');
+      const stored = await chrome.storage?.local?.get('erdv2_lastSolution');
+      const lastSol = urlSol || stored?.erdv2_lastSolution;
+
       if (lastSol && solutions.some(s => s.uniquename === lastSol)) {
         this.#toolbar.selectSolution(lastSol);
         await this.#loadSolution(lastSol);
@@ -151,18 +155,10 @@ export default class ErdPro {
     this.#container.innerHTML = '';
   }
 
-  onHide() {
-    this.#savePersistence();
-  }
+  onHide() { this.#savePersistence(); }
 
-  // -- Module Bridge integration ----------------------------------------------
-
-  /** Receive context from the AI agent. */
-  setContext(ctx) {
-    if (ctx.solution) this.#loadSolution(ctx.solution);
-  }
-
-  /** Expose current state to the AI agent. */
+  // Module Bridge
+  setContext(ctx) { if (ctx.solution) this.#loadSolution(ctx.solution); }
   getContext() {
     return {
       solution: this.#state?.solutionName || null,
@@ -176,42 +172,36 @@ export default class ErdPro {
   // =========================================================================
 
   async #loadSolution(uniqueName) {
-    this.#showLoading(true, 'Loading…');
+    this.#showLoading(true, 'Loading\u2026');
 
     try {
       await this.#loader.loadSolution(uniqueName, (msg) => {
         this.#showLoading(true, msg);
       });
 
-      // Compute layout
+      // Compute layout with dagre (actual entity sizes)
       this.#layout.compute();
 
-      // Route edges
-      this.#router.computeAll();
+      // Simple edge routing for initial view (fit-to-content will zoom out)
+      this.#router.computeSimple();
 
-      // Render
+      // Render all entities as full cards
       this.#renderer.renderAll();
 
       // Bind interactions
-      this.#interaction?.destroy();
-      this.#interaction = new InteractionManager(
-        this.#state, this.#renderer, this.#router, this.#viewport, this.#minimap,
-        {
-          onSelect: (name) => this.#onEntitySelect(name),
-          onExpand: (name, expanded) => this.#onEntityExpand(name, expanded),
-        }
-      );
-      this.#interaction.bindAll();
+      this.#bindInteractions();
 
-      // Focus mode
-      this.#focusMode = new FocusMode(this.#state, this.#renderer, this.#layout, this.#router);
-
-      // Fit to view
+      // Fit to view (determines initial zoom → may hide fields)
       this.#viewport.fitToContent();
+
+      // Set initial field visibility based on zoom
+      const fieldsVisible = this.#state.zoom >= ZOOM_THRESHOLD_FIELDS;
+      this.#renderer.setFieldsVisible(fieldsVisible);
+      this.#renderer.setEdgeStyle(fieldsVisible);
+
       this.#minimap.requestRender();
 
-      // Save last solution
-      chrome.storage?.local?.set({ erdpro_lastSolution: uniqueName });
+      chrome.storage?.local?.set({ erdv2_lastSolution: uniqueName });
 
       // Restore saved layout if available
       await this.#restorePersistence(uniqueName);
@@ -224,11 +214,21 @@ export default class ErdPro {
   }
 
   // =========================================================================
+  // Field visibility toggle
+  // =========================================================================
+
+  #onFieldsToggle(fieldsVisible) {
+    this.#renderer.setFieldsVisible(fieldsVisible);
+    this.#renderer.setEdgeStyle(fieldsVisible);
+    // Always use straight-line routing — dagre's layout already minimizes crossings,
+    // and the channel router needs layer data that dagre doesn't expose.
+  }
+
+  // =========================================================================
   // Event handlers
   // =========================================================================
 
   #wireSubscriptions() {
-    // Zoom changes from toolbar buttons
     this.#state.on('zoom', (z) => {
       if (z === 'fit') {
         this.#viewport.fitToContent();
@@ -238,45 +238,17 @@ export default class ErdPro {
       this.#toolbar.updateZoom(this.#state.zoom);
     });
 
-    // Preset changes
-    this.#state.on('preset', () => {
-      if (this.#state.entities.length === 0) return;
-      this.#recomputeAndRender();
-    });
-
-    // Filter changes
     this.#state.on('filterText', () => this.#applyFilter());
     this.#state.on('filterCustomOnly', () => this.#applyFilter());
-    this.#state.on('filterHideSystem', () => this.#applyFilter());
   }
 
-  #onEntitySelect(name) {
-    this.#detailPanel?.show(name);
-  }
-
-  #onEntityExpand(name, expanded) {
-    // Recompute size for this entity
-    const fields = this.#getVisibleFields(name);
-    this.#state.entitySizes.set(name, { w: 220, h: entityHeight(fields.length) });
-
-    // Rebuild entity and re-route connected edges
-    this.#renderer.rebuildEntity(name);
-    this.#router.computeForEntity(name);
-    for (const [schema, pathD] of this.#state.edgePaths) {
-      const rel = this.#state.relationships.find(r => r.schemaName === schema);
-      if (rel && (rel.sourceEntity === name || rel.targetEntity === name)) {
-        this.#renderer.updateEdgePath(schema, pathD);
-      }
-    }
-
-    // Re-bind interaction for rebuilt entity
-    const g = this.#renderer.getEntityEl(name);
-    if (g) {
-      const ent = this.#state.entities.find(e => e.LogicalName === name);
-      if (ent) this.#interaction?.bindAll(); // rebind all (simpler than single-entity bind)
-    }
-
-    this.#minimap?.requestRender();
+  #bindInteractions() {
+    this.#interaction?.destroy();
+    this.#interaction = new InteractionManager(
+      this.#state, this.#renderer, this.#router, this.#viewport, this.#minimap,
+      { onSelect: (name) => this.#detailPanel?.show(name) }
+    );
+    this.#interaction.bindAll();
   }
 
   #applyFilter() {
@@ -292,38 +264,9 @@ export default class ErdPro {
     }
   }
 
-  #recomputeAndRender() {
-    this.#layout.compute();
-    this.#router.computeAll();
-    this.#renderer.renderAll();
-    this.#interaction?.destroy();
-    this.#interaction = new InteractionManager(
-      this.#state, this.#renderer, this.#router, this.#viewport, this.#minimap,
-      {
-        onSelect: (name) => this.#onEntitySelect(name),
-        onExpand: (name, expanded) => this.#onEntityExpand(name, expanded),
-      }
-    );
-    this.#interaction.bindAll();
-    this.#viewport.fitToContent();
-    this.#minimap?.requestRender();
-  }
-
   // =========================================================================
   // Helpers
   // =========================================================================
-
-  #getVisibleFields(entityName) {
-    const preset = this.#state.preset;
-    if (preset === 'overview') return [];
-    const isExpanded = this.#state.expanded.get(entityName) === true;
-    const allFields = isExpanded
-      ? (this.#state.entityAllFields.get(entityName) || [])
-      : (this.#state.entityKeyFields.get(entityName) || []);
-    if (isExpanded) return allFields;
-    const filtered = allFields.filter(f => f.isPk || !this.#state.hiddenSystemFields.has(f.name));
-    return filtered.length > 15 ? filtered.slice(0, 15) : filtered;
-  }
 
   #showLoading(show, message = '') {
     if (!this.#loadingEl) return;
@@ -334,7 +277,7 @@ export default class ErdPro {
   #showNotification(message, type = 'info') {
     if (!this.#notificationEl) return;
     this.#notificationEl.textContent = message;
-    this.#notificationEl.className = `erdp-notification erdp-notification-${type}`;
+    this.#notificationEl.className = `erdv2-notification erdv2-notification-${type}`;
     this.#notificationEl.style.display = 'block';
     setTimeout(() => { this.#notificationEl.style.display = 'none'; }, 4000);
   }
@@ -352,28 +295,17 @@ export default class ErdPro {
       positions[ent] = { x: pos.x, y: pos.y };
     }
 
-    const expanded = {};
-    for (const [ent, exp] of this.#state.expanded) {
-      if (exp) expanded[ent] = true;
-    }
-
     try {
       await chrome.storage?.local?.set({
-        [`erdpro_layout_${name}`]: {
-          positions,
-          expanded,
-          preset: this.#state.preset,
-          pan: this.#state.pan,
-          zoom: this.#state.zoom,
-        },
+        [`erdv2_layout_${name}`]: { positions, pan: this.#state.pan, zoom: this.#state.zoom },
       });
     } catch { /* ok */ }
   }
 
   async #restorePersistence(uniqueName) {
     try {
-      const stored = await chrome.storage?.local?.get(`erdpro_layout_${uniqueName}`);
-      const data = stored?.[`erdpro_layout_${uniqueName}`];
+      const stored = await chrome.storage?.local?.get(`erdv2_layout_${uniqueName}`);
+      const data = stored?.[`erdv2_layout_${uniqueName}`];
       if (!data?.positions) return;
 
       let restored = false;
@@ -384,20 +316,13 @@ export default class ErdPro {
         }
       }
 
-      if (data.expanded) {
-        for (const [ent, exp] of Object.entries(data.expanded)) {
-          if (exp) this.#state.expanded.set(ent, true);
-        }
-      }
-
-      if (data.preset) this.#toolbar.setPreset(data.preset);
       if (data.pan) this.#state.pan = data.pan;
       if (data.zoom && data.zoom !== 'fit') this.#state.zoom = data.zoom;
 
       if (restored) {
-        this.#router.computeAll();
+        this.#router.computeSimple();
         this.#renderer.renderAll();
-        this.#interaction?.bindAll();
+        this.#bindInteractions();
         this.#viewport.updateTransform();
         this.#minimap?.requestRender();
       }

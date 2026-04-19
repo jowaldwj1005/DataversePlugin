@@ -1,6 +1,6 @@
 /**
- * ERD Pro — Reactive state store with pub/sub
- * @module erd-pro/state
+ * ERD v2 — Reactive state store with pub/sub
+ * @module erd-v2/state
  */
 
 import { SYSTEM_FIELD_NAMES } from './constants.js';
@@ -30,20 +30,16 @@ export class ErdState {
     this.expanded = new Map();
     this.selectedEntity = null;
     this.hoveredEntity = null;
-    this.focusEntity = null;
-    this.focusRadius = 1;
     this.hiddenSystemFields = new Set(SYSTEM_FIELD_NAMES);
     this.entityFieldOverrides = new Map();
 
     // View
     this.pan = { x: 0, y: 0 };
     this.zoom = 1;
-    this.preset = 'standard';
 
     // Filter
     this.filterText = '';
     this.filterCustomOnly = false;
-    this.filterHideSystem = false;
 
     // Meta
     this.solutionName = null;
@@ -52,7 +48,6 @@ export class ErdState {
     this.loadingMessage = '';
   }
 
-  /** Subscribe to changes on a key. Returns unsubscribe fn. */
   on(key, cb) {
     if (!this.#listeners.has(key)) this.#listeners.set(key, new Set());
     this.#listeners.get(key).add(cb);
@@ -63,13 +58,11 @@ export class ErdState {
     this.#listeners.get(key)?.delete(cb);
   }
 
-  /** Set a value and notify listeners. */
   set(key, value) {
     this[key] = value;
     this.#notify(key);
   }
 
-  /** Set multiple keys, notify once per key after all are set. */
   batch(updates) {
     const keys = [];
     for (const [key, value] of Object.entries(updates)) {
@@ -79,7 +72,6 @@ export class ErdState {
     for (const key of keys) this.#notify(key);
   }
 
-  /** Reset all data state (keeps UI/view state). */
   resetData() {
     this.entities = [];
     this.relationships = [];
