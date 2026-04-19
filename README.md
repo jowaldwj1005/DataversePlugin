@@ -74,6 +74,12 @@ Dynamics 365 · Dataverse
 </p>
 <p align="center"><em>Query Builder with related table joins &nbsp;|&nbsp; Schema Explorer with 743 tables</em></p>
 
+<p align="center">
+  <img src="store/screenshots/screenshot-9.png" width="400" alt="Agent Chat">
+  <img src="store/screenshots/screenshot-10.png" width="400" alt="Agent Skills">
+</p>
+<p align="center"><em>Customizable Agent Experience &nbsp;|&nbsp; BYOK, 28 prebuilt tools, endlessly extendable via human-in-the-loop for post operations and skills framework</em></p>
+
 ---
 
 ## Features
