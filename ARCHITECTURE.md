@@ -6,7 +6,7 @@ Conceptual overview of the Dataverse Toolkit — a Chrome Extension (Manifest V3
 
 ## Design Principles
 
-- **Zero dependencies.** No frameworks, no bundlers, no libraries. Every component — from the force-directed graph layout to the ZIP parser — is built from browser primitives.
+- **Minimal dependencies.** No frameworks, no bundlers. One vendored library (`@dagrejs/dagre` v3, 41KB) for ERD graph layout — added after a custom Sugiyama implementation proved insufficient for production use. Everything else is built from browser primitives.
 - **No backend.** The extension runs entirely in the browser. API calls go through the user's existing Dynamics 365 session. AI features use BYOK (bring your own key) with direct provider calls.
 - **Session piggyback.** Instead of managing OAuth tokens, the extension rides the user's already-authenticated browser session. This eliminates token refresh logic and consent flows entirely.
 - **Lazy everything.** Modules load on first tab click. Metadata fetches on first access. Entity trees expand on demand. Nothing runs until it's needed.
@@ -67,7 +67,7 @@ MV3 service workers are killed after ~30 seconds of inactivity. The worker resto
 
 The side panel is a single HTML page (`index.html`) bootstrapped by `app.js`. It provides:
 
-- A **tab bar** with 10 workspace tabs
+- A **tab bar** with 11 workspace tabs (AI-first: Agent tab is default when AI is configured)
 - A **module registry** that lazy-loads each tab's module on first activation
 - A **metadata cache** with TTL-based expiry and persistent backup in `chrome.storage.local`
 - An **event bus** for decoupled communication between modules (connection state changes, settings updates)
@@ -106,16 +106,18 @@ The modules range from simple utilities to complex sub-applications:
 
 | Simple | Medium | Complex |
 |--------|--------|---------|
-| Form Inspector | API Explorer | Query Builder (FetchXML) |
-| Settings | Request Builder | ERD Viewer |
+| Form Tools | API Explorer | Query Builder (FetchXML) |
+| Settings | Request Builder | ERD v2 (13 sub-modules + dagre) |
 | Tool Builder | Security Inspector | Bulk Operations (8 sub-modules) |
-| | | AI Customizer (7 sub-modules) |
+| | ERD Viewer (legacy) | AI Customizer (7 sub-modules) |
 
-The two most complex modules — Bulk Operations and AI Customizer — are decomposed into sub-module directories with their own internal architecture:
+The three most complex modules — Bulk Operations, AI Customizer, and ERD v2 — are decomposed into sub-module directories with their own internal architecture:
 
 **Bulk Operations** uses a wizard pattern: a base class defines the wizard lifecycle (setup, preview, execute, results), and each operation type (create, update, delete, assign, deep insert, status toggle) extends it. Two additional modules handle Configuration Migration Tool export/import.
 
-**AI Customizer** implements a multi-turn agent loop: an agent runner orchestrates LLM calls with tool-use support (metadata lookups), a timeline component renders the conversation history, provider adapters normalize across OpenAI/Azure/Anthropic APIs, and an operation layer handles the actual view modification and creation.
+**AI Customizer** implements a multi-turn agent loop: an agent runner orchestrates LLM calls with tool-use support (28 built-in tools), a timeline component renders the conversation history, provider adapters normalize across OpenAI/Azure/Anthropic APIs (supporting both Responses API and Chat Completions), and a skills system enables reusable knowledge sharing. System skills provide built-in Dataverse patterns; user skills can be created and shared via Dataverse records.
+
+**ERD v2** uses `@dagrejs/dagre` v3 for Sugiyama hierarchical layout with Brandes-Kopf coordinate assignment. The module has 13 sub-files: layout engine (dagre wrapper), SVG renderer, channel router, viewport (pan/zoom/trackpad), interaction manager, minimap, toolbar, export engine (SVG/PNG with CSS inlining), detail panel, data loader, state store, constants, and helpers. Entity borders are color-coded to match their relationship edges — parent entities get thick colored borders, leaf entities get thin gray borders. Includes pop-out to full window mode.
 
 ---
 
@@ -218,10 +220,13 @@ src/
 └── sidepanel/           Main application
     ├── app.js               Shell, routing, MetadataCache
     ├── index.html           Entry point
+    ├── lib/                 Vendored libraries
+    │   └── dagre.esm.js         @dagrejs/dagre v3 (graph layout)
     ├── modules/             One class per tab
+    │   ├── erd-v2/              ERD v2 sub-modules (13 files)
     │   ├── bulk-ops/            Wizard sub-modules
     │   └── ai-customizer/       Agent sub-modules
     └── styles/              CSS (main, themes, components)
 ```
 
-The flat module structure is intentional. With no build step and no framework routing, each module is a self-contained ES module file that can be understood in isolation. The two complex modules (Bulk Ops, AI Customizer) are the only ones that warranted sub-directories.
+The flat module structure is intentional. With no build step and no framework routing, each module is a self-contained ES module file that can be understood in isolation. The three complex modules (Bulk Ops, AI Customizer, ERD v2) are the only ones that warranted sub-directories.

@@ -174,8 +174,8 @@ The system prompt automatically includes:
 - ES module imports/exports everywhere
 - Private fields with `#` prefix for class internals
 - CSS custom properties: `--color-*` prefix (defined in `themes.css`)
-- CSS class naming: `{module-prefix}-{element}` (e.g. `qb-card`, `erd-toolbar`)
-- No external dependencies
+- CSS class naming: `{module-prefix}-{element}` (e.g. `qb-card`, `erdv2-entity`, `erd-toolbar`)
+- One vendored dependency: `@dagrejs/dagre` v3 in `src/sidepanel/lib/dagre.esm.js` (41KB ESM, graph layout for ERD v2)
 
 ---
 
@@ -199,9 +199,11 @@ The system prompt automatically includes:
 | **Request Builder** | Raw HTTP tool for one-off calls. Not a query builder. POST hides ID/QueryOptions, record ID disables `$filter`. |
 | **Bulk Ops** | JSON array of `{method, url, body}` pasted by user → assembled into `$batch` multipart. Not a visual batch builder. |
 | **Security** | Role matrix uses `RetrieveRolePrivilegesRole`. User permissions use `RetrieveUserPrivileges`. Field security uses direct nav prop on systemuser. |
-| **ERD** | Solution → solutioncomponents → entities. Export Schema = JSON Schema draft-07. |
+| **ERD** | Legacy ERD viewer (force/hierarchy/grid layout). Kept for comparison. Solution → solutioncomponents → entities. |
+| **ERD v2** | dagre-powered hierarchical layout with actual entity sizes. Color-coded entity borders (parent color = edge color). Single-click select + detail panel. Pop-out to full window. SVG/PNG export. Uses `@dagrejs/dagre` v3 (13 sub-modules in `erd-v2/`). |
 | **Tools** | Agent Tool Builder. Entity cards → JSON Schema tool definitions (Claude/OpenAI). 1:N children as deep insert array properties. Output: Tool Schema, Deep Insert template, API info. |
-| **AI** | Dataverse Agent (BYOK: OpenAI/Azure/Anthropic). "Claude Code for Dataverse". 28 built-in tools, multi-turn agent loop, sessions, skills, view operations, confirmation UI. Can navigate to and orchestrate ALL other modules via Module Bridge. Quick Chat Bar on every tab (`Ctrl+I`). |
+| **Form** | Field inspector (All/Dirty/Required/Hidden/Disabled filters), JSON record viewer, record bookmarks, quick clone, environment badge (DEV/TEST/PROD). |
+| **AI** | Dataverse Agent (BYOK: OpenAI/Azure/Anthropic). "Claude Code for Dataverse". 28 built-in tools, multi-turn agent loop, sessions, system skills, skill sharing via Dataverse. Supports Responses API (default for OpenAI/Azure) + Chat Completions fallback. Can navigate to and orchestrate ALL other modules via Module Bridge. Quick Chat Bar on every tab (`Ctrl+I`). AI-first: Agent tab is default when AI is configured. |
 | **Settings** | Persisted to `chrome.storage.local`. Theme applies immediately; no page reload needed. AI provider settings (endpoint, API key, model) stored locally. |
 
 ---
