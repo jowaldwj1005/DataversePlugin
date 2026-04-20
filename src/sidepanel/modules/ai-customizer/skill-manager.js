@@ -219,6 +219,11 @@ export class SkillManager {
     return [...system, ...this.#skills.values()];
   }
 
+  /** Returns only user-created skills (excludes system skills). */
+  getUserSkills() {
+    return [...this.#skills.values()];
+  }
+
   get(id) {
     return SYSTEM_SKILLS.find(s => s.id === id) || this.#skills.get(id) || null;
   }

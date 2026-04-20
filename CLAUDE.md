@@ -1,7 +1,7 @@
 # Dataverse Toolkit — Project Guide
 
 Chrome Extension (Manifest V3) for Dynamics 365 / Power Platform developers.
-Side panel workspace with zero backend dependencies, no build step, no external libraries.
+Side panel workspace with zero backend dependencies, no build step, one vendored library (dagre for ERD graph layout).
 
 ---
 
@@ -130,12 +130,13 @@ AI Agent (chat)
 ### Agent tools (tool-registry.js)
 
 28 built-in tools in categories:
-- **metadata**: `get_entities`, `get_entity_metadata`, `get_optionset`, `inspect_form`
+- **metadata**: `search_entities` (requires `filter` param), `get_entity_metadata`, `get_optionset`, `inspect_form`
 - **query**: `execute_fetchxml`, `execute_odata`, `get_record`
 - **crud**: `create_record`, `update_record`, `delete_record` (confirmation required)
 - **customization**: `publish_entity`, `execute_action` (confirmation required)
 - **code**: `execute_code` (confirmation required, never auto-approvable)
 - **navigation**: `navigate_module`, `read_module_state`, `load_fetchxml`, `load_request`, `load_bulk_operations`, `show_erd`, `show_security`, `generate_tool_schema`
+- **skills**: `list_skills`, `create_skill`, `update_skill`
 - **other**: `name_conversation`
 
 Tool handlers receive `(params, ctx)` where `ctx = { api, cache, log, bridge }`.
@@ -160,9 +161,10 @@ Hidden when AI tab is active. Appears/disappears when AI settings change.
 
 The system prompt automatically includes:
 1. Tool list with descriptions and param schemas
-2. Skill documents linked to active tools
+2. Skill documents linked to active tools (system skills + user-created skills)
 3. Current entity/view context (if selected)
 4. Active module state via `bridge.buildContextForPrompt()` (what tab the user is on, current query/request/etc.)
+5. System skills (solution queries, metadata patterns) injected per-tool context
 
 ---
 

@@ -385,7 +385,7 @@ export default class AiCustomizer {
   // -----------------------------------------------------------------------
 
   async _seedDefaultSkills() {
-    if (this.#skillManager.getAll().length > 0) return;
+    if (this.#skillManager.getUserSkills().length > 0) return;
     this._renderSkillDrawer();
     await new Promise(r => setTimeout(r, 600));
 
