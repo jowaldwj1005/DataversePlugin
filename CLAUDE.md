@@ -220,3 +220,19 @@ The system prompt automatically includes:
 After reloading the extension (dev mode), the side panel recovers automatically — no manual page refresh needed.
 
 See `skills/` for transferable patterns used in this project.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
