@@ -46,7 +46,7 @@ Bring your own key. Users supply their own AI provider credentials (OpenAI, Azur
 ### Work shapes
 
 **Authoring**:
-Creating or editing tables, columns, relationships, security roles, forms, and views. Distinct from Query (read-only). Always Agent-driven. Most individual Authoring actions are *Agent-only* mode (e.g. *add column*, *add relationship*) with optional UI for visualization or confirmation; Solution-scale Authoring is *Agent-led, UI-augmented* (the Agent runs the multi-step flow, the UI shows diffs and accepts interventions). Agent-driven *generation* of forms and views is in scope (one-shot create forms for many entities). A click-by-click WYSIWYG form/view *editor* is **not** — that surface stays with make.powerapps.com.
+Creating or editing tables, columns, relationships, security roles, forms, and views. Distinct from Query (read-only). Always Agent-driven. Both single-op (*add column*) and Solution-scale (*generate forms for every entity in Solution X*) Authoring run through the same Approval Flow — Agent proposes steps, UI surfaces a diff per step, the human approves / edits / aborts. A single-op is just a one-step flow. Agent-driven *generation* of forms and views is in scope (one-shot create forms for many entities). A click-by-click WYSIWYG form/view *editor* is **not** — that surface stays with make.powerapps.com.
 _Avoid_: schema editing, customization, designer
 
 **Query**:
