@@ -1,5 +1,7 @@
 # Rewrite Foundations
 
+> **Partially superseded (2026-06-04).** This brief was written under the *complexity-reduction* optimization target. The owner has since reset the target to **robust + max-power + showcase**, accepted a build step, and the **agent core is now decided in [ADR-0004](./adr/0004-agent-core.md) / [`AGENT-CORE.md`](./AGENT-CORE.md)** (hybrid AI SDK 6 + LangGraph, QuickJS interpreter, MCP-ready registry). Treat §1–§3's *agent-orchestration* recommendation as historical; **the UI/CSS/build/transport picks and the §4 deep-module salvage catalog still stand** (build step = yes). Where this doc and ADR-0004 disagree on the agent, ADR-0004 governs.
+
 > Synthesis brief for the Dataverse Toolkit rewrite. Grounded in `docs/CODEBASE-ATLAS.md` (verified ground truth of the current build), `docs/PRD.md` / ADR-0001 / ADR-0002 (product positioning + Module roster), and the framework research that follows ADR-0004's mandate. This brief picks the technical stack the rewrite stands on and writes the reuse contract for the deep Modules that survive.
 >
 > Optimization target, in order: **complexity reduction → MV3 fit → design/UX quality.** Where a choice trades one for another, the brief says so.

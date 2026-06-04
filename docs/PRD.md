@@ -137,7 +137,7 @@ Compact specs; depth lives in the Atlas (current behavior) and Foundations (reus
 
 **10. Skills** — Browse, run, edit, and share Skills (markdown + Agent-Tool links). System Skills ship with the product; User Skills are authored by users. **Persistence = Solution-bundled Dataverse records** (see §9). Absorbs the current Tool Builder (entity→tool-schema codegen). Browse/run works without BYOK; Skills that call the Agent obviously need it.
 
-**11. Agent Chat** *(transverse)* — The conversational surface. From inside it, the Agent reads any Module's state, drives it through Tools, and navigates the user to it — but it is one Module among many, not the shell. Rebuilt on the AI SDK 6 loop (§7). Preserves the Tool Registry pattern, provider transport, session persistence, confirmation flow; drops the bespoke JSON protocol + `repairJson`. Quick Chat Bar (`Ctrl+I`) on every Module.
+**11. Agent Chat** *(transverse)* — The conversational surface. From inside it, the Agent reads any Module's state, drives it through Tools, and navigates the user to it — but it is one Module among many, not the shell. Rebuilt on the hybrid agent core (§7, [ADR-0004](./adr/0004-agent-core.md)). Preserves the Tool Registry pattern, provider transport, session persistence, confirmation flow; drops the bespoke JSON protocol + `repairJson`. Quick Chat Bar (`Ctrl+I`) on every Module.
 
 **12. Settings** — Theme, cache TTL, BYOK provider config, the **write-safety configuration** (§8), and the **Environment-name display** preference. Extracted from `app.js` into its own Module with validation + import/export.
 
@@ -145,7 +145,7 @@ Compact specs; depth lives in the Atlas (current behavior) and Foundations (reus
 
 ## 7. The Agent
 
-**Loop.** Rebuilt on **Vercel AI SDK 6** (§10): native tool-calling with real tool-result roles, `stopWhen`/`stepCountIs` stop conditions, `abortSignal`, streaming, and `needsApproval` for human-in-the-loop gating. The bespoke text-JSON protocol (`tool_call`/`tool_calls`/`done`/`question`/`error`), `repairJson`, control-char escaping, and the 8000-char user-turn flattening are **deleted** — they exist only to paper over the absence of native tool roles.
+**Loop.** Rebuilt as a **hybrid** ([ADR-0004](./adr/0004-agent-core.md) / [`AGENT-CORE.md`](./AGENT-CORE.md)): **Vercel AI SDK 6 `ToolLoopAgent`** as the floor (native tool-calling with real tool-result roles, `stopWhen`/`stepCountIs`, `abortSignal`, `needsApproval` HITL), **one instance per `{envId, threadId}`** — which structurally fixes the context-bleed bug (messages can't load into the wrong thread/Environment). **LangGraph.js lazy-loaded only for Authoring & Bulk Ops** (durable/branching/HITL/replay), contingent on a Slice-0 bundle spike. The bespoke text-JSON protocol, `repairJson`, control-char escaping, and the 8000-char user-turn flattening are **deleted**. Streaming requires an offscreen-document SSE relay (the SW buffers today).
 
 **Tools.** The Tool Registry + Executor split and the confirmation model are kept (gold). The corrected baseline is **25 Tools** (not 28); `search_entities` is `get_entities`; `ctx = {api, cache, log, bridge, skillManager}`. New Tools are added per Module (Query, Request Builder, Security, Authoring). The half-built "user-created executable tools" stub is dropped — user extensibility is **Skills**, not user-authored Tool handlers. Hollow navigation "Tools" that only switch Modules (`show_erd`, `show_security`, `load_*`) are reconsidered against §4.1 (the user can reach those Modules directly anyway).
 
@@ -199,7 +199,7 @@ The full analysis is in [`REWRITE-FOUNDATIONS.md`](./REWRITE-FOUNDATIONS.md); th
 | Concern | Decision |
 |---|---|
 | **Build step** | **Yes — minimal Vite build.** Reverses ADR-0001's "no build step." Unlocks the stack below. *(Owner-approved.)* |
-| **Agent orchestration** | **Vercel AI SDK 6** (`ai` + `@ai-sdk/openai` / `@ai-sdk/anthropic` / `@ai-sdk/azure`). Deletes the bespoke protocol + `repairJson`; native tool roles; `needsApproval` HITL (maps onto §8); `stopWhen`/`abortSignal`. *Verified June 2026: SDK 6 exists, supports custom `fetch`, `needsApproval`, `stopWhen`.* |
+| **Agent core** | **Hybrid (decided in [ADR-0004](./adr/0004-agent-core.md) / [`AGENT-CORE.md`](./AGENT-CORE.md)).** Vercel AI SDK 6 `ToolLoopAgent` as the robust floor (deletes the bespoke protocol + `repairJson`; native tool roles; `needsApproval` ↔ §8; one instance per `{envId, threadId}` — the structural context-bleed fix), **+ LangGraph.js lazy-loaded only for Authoring & Bulk Ops** (durable/branching/HITL, contingent on a Slice-0 bundle spike; fallback = AI-SDK agents-as-tools). Three-layer scoped state. **QuickJS-WASM code interpreter** (Pyodide cut). **MCP deferred to v1.1**, registry kept MCP-ready. *Supersedes this row's earlier "Vercel AI SDK 6 only" pick (made under the dropped minimal-complexity target).* |
 | **UI rendering** | **Lit 3** web components — declarative render + scoped styles; ~6kB, eval-free; near-1:1 with the current "Module class with `render()`" mental model. |
 | **CSS / design system** | **Keep `themes.css` token layer verbatim** (~176 tokens, the one good asset); rebuild everything else as per-Module Shadow-DOM scoped styles + a small shared primitives sheet. Tokens pierce Shadow DOM **only if `[data-theme]` stays on a light-DOM ancestor** — written into the contract. Kills the 3 competing CSS regimes. |
 | **State + Bridge** | A tiny **signals** Workspace store (env-namespaced — fixing the stale-cache risk) + the Module Bridge promoted to a **typed contract**. |
@@ -208,7 +208,7 @@ The full analysis is in [`REWRITE-FOUNDATIONS.md`](./REWRITE-FOUNDATIONS.md); th
 
 **Salvage as deep modules** (reuse contract): CORS transport, `DataverseClient`, `QueryModel`+codegen, ERD layout, CMT/`$batch` engine, Tool Registry/Executor, Module Bridge, the Authoring (`view-operation`) engine, metadata cache (resurrect env-namespacing from the dead shared cache), entity→tool-schema codegen. Strip the dead bearer-token subsystem, the CSS-in-JS, `system-prompts.js`, ERD v1, Record Viewer, the dead Code Editor. Full interfaces in [`REWRITE-FOUNDATIONS.md` §4](./REWRITE-FOUNDATIONS.md).
 
-**Known risks to design out** (from the foundations critique): the CRXJS MAIN-world footgun (mitigated above); SW-must-stay-ESM after bundling; `[data-theme]` must live on a light-DOM ancestor; verify Responses-API features map onto the SDK before deleting `provider-adapters`; lint the bundle for transitive `eval`/`new Function` against MV3 CSP.
+**Known risks to design out** (from the foundations + agent-core critiques): the CRXJS MAIN-world footgun (mitigated above); SW-must-stay-ESM after bundling; `[data-theme]` must live on a light-DOM ancestor; verify Responses-API features map onto the SDK before deleting `provider-adapters`; lint the bundle for transitive `eval`/`new Function` against MV3 CSP. **Agent-core additions (ADR-0004):** the manifest has **no CSP key** today — add `extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"` before any WASM (the code interpreter is blocked without it); streaming needs an offscreen-document SSE relay (the SW buffers today); fix the `findDynamicsTab` multi-tab mis-routing before trusting `envId` as the isolation root; move auto-approval state per-thread.
 
 ---
 
@@ -251,7 +251,7 @@ Vertical slices, each shippable and proving the architecture end-to-end before b
 
 Only genuinely hard-to-reverse **technical** decisions remain as ADRs (everything product-level is in this PRD):
 
-- **ADR-0004 — Agent framework specifics.** *Largely decided here (Vercel AI SDK 6, Path A).* Remaining: exact provider-options mapping for Responses-API features; the `provider-adapters` keep-vs-delete call after the equivalence check; the bundler pick (CRXJS / WXT / esbuild) at slice 0.
+- **ADR-0004 — Agent core. ✅ Decided** ([`adr/0004-agent-core.md`](./adr/0004-agent-core.md), full design in [`AGENT-CORE.md`](./AGENT-CORE.md)): hybrid (AI SDK 6 floor + LangGraph for Authoring/Bulk Ops), QuickJS code interpreter (Pyodide cut), MCP deferred to v1.1, three-layer scoped state. Remaining sub-items: two Slice-0 spikes (LangGraph bundle, WASM-CSP); provider-options mapping for Responses-API features; bundler pick (CRXJS / WXT / esbuild).
 - **ADR-0005 — Workspace shell architecture.** Module lifecycle contract (render/destroy/onHide/get/setContext — and actually *call* `destroy()`), signals store shape, Bridge wiring, dev HMR.
 - **ADR-0006 — Skill ownership / sharing model.** The Skill Dataverse table schema; personal vs team vs Solution-bundled; security roles; versioning.
 
@@ -264,6 +264,7 @@ Smaller open questions (not ADR-worthy): whether Agent Investigation and the Dev
 - **This PRD** — living source of truth for product direction. Supersedes ADR-0001 + ADR-0002.
 - [`CONTEXT.md`](../CONTEXT.md) — the glossary (vocabulary is load-bearing). Stays separate; edited as terms sharpen.
 - [`CODEBASE-ATLAS.md`](./CODEBASE-ATLAS.md) — verified ground truth of the current `main` build (salvage ledger, discrepancy table).
-- [`REWRITE-FOUNDATIONS.md`](./REWRITE-FOUNDATIONS.md) — the stack decision + deep-module reuse contract.
+- [`REWRITE-FOUNDATIONS.md`](./REWRITE-FOUNDATIONS.md) — UI/CSS/build/transport stack + deep-module reuse contract (its agent-orchestration line is superseded by ADR-0004).
+- [`AGENT-CORE.md`](./AGENT-CORE.md) + [`adr/0004-agent-core.md`](./adr/0004-agent-core.md) — the decided agent core.
 - `docs/adr/0001`, `docs/adr/0002` — superseded; retained for history.
 - `docs/adr/0004`, `0005`, `0006` — to be written for the hard technical forks above.
