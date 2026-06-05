@@ -236,3 +236,7 @@ Canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-hu
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Session track
+
+`docs/sessions/SESSIONS.md` is the map of work sessions (what was done, which handoff was written, where it continued). **Read its `▶ NEXT SESSION` block first** when re-entering rewrite work. When you write a handoff at the end of a session: (1) save a durable copy under `docs/sessions/handoffs/` (temp files get cleaned), and (2) add a one-row entry to the top of the Sessions table + update the NEXT SESSION block. Keep entries one line — this file must stay skimmable in a small context window.
