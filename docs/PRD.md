@@ -252,7 +252,7 @@ Vertical slices, each shippable and proving the architecture end-to-end before b
 Only genuinely hard-to-reverse **technical** decisions remain as ADRs (everything product-level is in this PRD):
 
 - **ADR-0004 — Agent core. ✅ Decided** ([`adr/0004-agent-core.md`](./adr/0004-agent-core.md), full design in [`AGENT-CORE.md`](./AGENT-CORE.md)): hybrid (AI SDK 6 floor + LangGraph for Authoring/Bulk Ops), QuickJS code interpreter (Pyodide cut), MCP deferred to v1.1, three-layer scoped state. Remaining sub-items: two Slice-0 spikes (LangGraph bundle, WASM-CSP); provider-options mapping for Responses-API features; bundler pick (CRXJS / WXT / esbuild).
-- **ADR-0005 — Workspace shell architecture.** Module lifecycle contract (render/destroy/onHide/get/setContext — and actually *call* `destroy()`), signals store shape, Bridge wiring, dev HMR.
+- **ADR-0005 — Workspace shell architecture. ✅ Decided** ([`adr/0005-workspace-shell.md`](./adr/0005-workspace-shell.md)): shell-owned three-anchor status strip (single source per anchor); Module lifecycle = evict + rehydrate from the store with `destroy()` actually called (heavy Modules keep-warm); three-layer env-namespaced signals store; Control/wheel as shell signal with a one-holder invariant; typed Module Bridge over the store (`_pageUrl` leak severed); HMR preserves the store.
 - **ADR-0006 — Skill ownership / sharing model.** The Skill Dataverse table schema; personal vs team vs Solution-bundled; security roles; versioning.
 
 Smaller open questions (not ADR-worthy): whether Agent Investigation and the DevTools panel share one capture backbone; the exact reliable source (if any) for authoritative Environment-type.
