@@ -186,7 +186,7 @@ Skills are the extensibility mechanism (per §4.5). The current implementation p
 - **User Skills** are authored in-Module (markdown editor + Tool picker), saved as records, and shared by adding them to a Solution.
 - Browse/run works without BYOK; AI-driven Skills need it.
 - **MVP vs v1.1:** MVP ships browse + run + create + the Solution export/import path. Richer authoring/sharing UX can follow (cut-order, §12).
-- The detailed ownership model (personal vs team vs Solution-bundled, security roles, versioning) and the Skill table schema are the one genuinely hard-to-reverse fork left → **ADR-0006** (§13).
+- The detailed ownership model, security roles, versioning, and table schema are decided in **[ADR-0006](./adr/0006-skill-ownership.md) ✅**: **System Skills ship in the extension** (read-only, no table needed); **User Skills = `dvt_skill` records** (User/Team-owned → native Dataverse security, zero bespoke permission layer); `dvt_uniquename` alternate key → idempotent upsert; versioning via `dvt_version` + platform rowversion; transport via toolkit markdown export/import (built) or Solution/ALM (platform).
 
 Also fix the salvaged bugs: `importFromMarkdown` drops linked Tools (array-vs-object), and the relevance filter never narrows (full Tool list passed in).
 
@@ -254,7 +254,7 @@ Only genuinely hard-to-reverse decisions remain as ADRs (everything else is in t
 - **ADR-0003 — UX visual language. ✅ Decided** ([`adr/0003-ux-visual-language.md`](./adr/0003-ux-visual-language.md)): accent locked to the warm-organic **Sage** family (sage-green accent + clay-amber Agent, Light+Dark); anti-rainbow discipline; Compact density; `themes.css` Sage tokens as default; narrow-panel shell (thin icon rail + bottom Agent dock + Quick Chat Bar); minimal motion. Builds on `DESIGN-CONCEPT.md`.
 - **ADR-0004 — Agent core. ✅ Decided** ([`adr/0004-agent-core.md`](./adr/0004-agent-core.md), full design in [`AGENT-CORE.md`](./AGENT-CORE.md)): hybrid (AI SDK 6 floor + LangGraph for Authoring/Bulk Ops), QuickJS code interpreter (Pyodide cut), MCP deferred to v1.1, three-layer scoped state. Remaining sub-items: two Slice-0 spikes (LangGraph bundle, WASM-CSP); provider-options mapping for Responses-API features; bundler pick (CRXJS / WXT / esbuild).
 - **ADR-0005 — Workspace shell architecture. ✅ Decided** ([`adr/0005-workspace-shell.md`](./adr/0005-workspace-shell.md)): shell-owned three-anchor status strip (single source per anchor); Module lifecycle = evict + rehydrate from the store with `destroy()` actually called (heavy Modules keep-warm); three-layer env-namespaced signals store; Control/wheel as shell signal with a one-holder invariant; typed Module Bridge over the store (`_pageUrl` leak severed); HMR preserves the store.
-- **ADR-0006 — Skill ownership / sharing model.** The Skill Dataverse table schema; personal vs team vs Solution-bundled; security roles; versioning.
+- **ADR-0006 — Skill ownership / sharing model. ✅ Decided** ([`adr/0006-skill-ownership.md`](./adr/0006-skill-ownership.md)): System Skills in-extension, User Skills = `dvt_skill` (User/Team-owned, native security, no bespoke layer); alternate-key upsert; `dvt_version` + rowversion; markdown export/import (built) + Solution/ALM (platform).
 
 Smaller open questions (not ADR-worthy): whether Agent Investigation and the DevTools panel share one capture backbone; the exact reliable source (if any) for authoritative Environment-type.
 
