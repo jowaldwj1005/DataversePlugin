@@ -249,8 +249,9 @@ Vertical slices, each shippable and proving the architecture end-to-end before b
 
 ## 13. Open forks → remaining ADRs
 
-Only genuinely hard-to-reverse **technical** decisions remain as ADRs (everything product-level is in this PRD):
+Only genuinely hard-to-reverse decisions remain as ADRs (everything else is in this PRD):
 
+- **ADR-0003 — UX visual language. ✅ Decided** ([`adr/0003-ux-visual-language.md`](./adr/0003-ux-visual-language.md)): accent locked to the warm-organic **Sage** family (sage-green accent + clay-amber Agent, Light+Dark); anti-rainbow discipline; Compact density; `themes.css` Sage tokens as default; narrow-panel shell (thin icon rail + bottom Agent dock + Quick Chat Bar); minimal motion. Builds on `DESIGN-CONCEPT.md`.
 - **ADR-0004 — Agent core. ✅ Decided** ([`adr/0004-agent-core.md`](./adr/0004-agent-core.md), full design in [`AGENT-CORE.md`](./AGENT-CORE.md)): hybrid (AI SDK 6 floor + LangGraph for Authoring/Bulk Ops), QuickJS code interpreter (Pyodide cut), MCP deferred to v1.1, three-layer scoped state. Remaining sub-items: two Slice-0 spikes (LangGraph bundle, WASM-CSP); provider-options mapping for Responses-API features; bundler pick (CRXJS / WXT / esbuild).
 - **ADR-0005 — Workspace shell architecture. ✅ Decided** ([`adr/0005-workspace-shell.md`](./adr/0005-workspace-shell.md)): shell-owned three-anchor status strip (single source per anchor); Module lifecycle = evict + rehydrate from the store with `destroy()` actually called (heavy Modules keep-warm); three-layer env-namespaced signals store; Control/wheel as shell signal with a one-holder invariant; typed Module Bridge over the store (`_pageUrl` leak severed); HMR preserves the store.
 - **ADR-0006 — Skill ownership / sharing model.** The Skill Dataverse table schema; personal vs team vs Solution-bundled; security roles; versioning.

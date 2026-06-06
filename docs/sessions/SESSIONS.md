@@ -20,9 +20,9 @@ How the chain works: each session usually ends by writing a **handoff** (a temp/
 6. `docs/DESIGN-CONCEPT.md` — UX direction distilled from the prototype (firm principles; exact visual still open)
 7. `docs/sessions/handoffs/2026-06-04-rewrite-docs-session-handoff.md` — the running self-handoff (decisions locked / not-to-reopen)
 
-**Open next deliverables:** ADR-0003 (UX), ~~ADR-0005~~ ✅, ADR-0006 (Skill ownership/sharing). Then Slice-0 bundle spike (decides LangGraph lazy-load).
+**Open next deliverables:** ~~ADR-0003~~ ✅, ~~ADR-0005~~ ✅, **ADR-0006** (Skill ownership/sharing) — the last ADR. Then Slice-0 bundle spike (decides LangGraph lazy-load) → implementation.
 
-> **ADR-0005 decided (06-06)** — `docs/adr/0005-workspace-shell.md`. Locked: shell-owned three-anchor status strip; Module lifecycle = evict + rehydrate from store, `destroy()` actually runs (ERD-class Modules keep-warm); three-layer env-namespaced signals store; Control/wheel = shell signal, one-holder invariant; typed Bridge over the store (`_pageUrl` leak severed); HMR keeps the store. Remaining ADRs: **ADR-0003 (UX)**, **ADR-0006 (Skills)**.
+> **ADR-0003 + 0005 decided (06-06).** **0005** (`adr/0005-workspace-shell.md`): shell-owned three-anchor status strip; Module lifecycle = evict + rehydrate from store, `destroy()` actually runs (ERD-class keep-warm); three-layer env-namespaced signals store; Control/wheel = shell signal, one-holder; typed Bridge over the store (`_pageUrl` leak severed); HMR keeps the store. `SHELL.md` companion = approved, write at Slice 0. **0003** (`adr/0003-ux-visual-language.md`): accent = warm-organic **Sage** (sage-green + clay-amber Agent, Light+Dark); anti-rainbow; Compact; Sage as `themes.css` default; narrow-panel shell (icon rail + bottom Agent dock + Quick Chat Bar); minimal motion. **Only ADR-0006 (Skills) remains.**
 
 **UX prototype** (throwaway, for reference only): `C:\tmp\dvt-proto` → `start C:\tmp\dvt-proto\index.html`. Brief: `docs/sessions/handoffs/2026-06-04-prototype-handoff.md`.
 
@@ -32,7 +32,7 @@ How the chain works: each session usually ends by writing a **handoff** (a temp/
 
 | Session | Date | What happened | Handoff written → continued in |
 |---|---|---|---|
-| *(current)* | 06-06 | **ADR-0005 (Workspace shell).** Loaded FOUNDATIONS + DESIGN-CONCEPT + handoff; two owner forks resolved (status-strip = shell-owned; lifecycle = evict+rehydrate). Wrote **`docs/adr/0005-workspace-shell.md`**; reconciled PRD §13. | (committed) |
+| *(current)* | 06-06 | **ADR-0005 + ADR-0003.** 0005 (shell/state): status-strip = shell-owned, lifecycle = evict+rehydrate (owner forks). 0003 (UX): accent locked to warm-organic **Sage** (owner). Wrote both ADRs + `SHELL.md` approved-for-Slice-0; reconciled PRD §13. Only ADR-0006 (Skills) left. | (committed) |
 | `23c94aea` | 06-04 17:32 | **Design distillation.** Read prototype + gave look/feel feedback → wrote **`docs/DESIGN-CONCEPT.md`** (firm principles: one design system, shared Focus + "the wheel", restraint rubric). Open: exact accent/shell visual. | DESIGN-CONCEPT.md (committed) |
 | `1d8bbe45` | 06-04 15:19 | **UX prototyping (rounds 1–2).** Built throwaway fake-UI prototypes in `C:\tmp\dvt-proto` (Query, Approval, Safety, Bulk-Ops choreography). Hit usage limits. Rule established: Opus only plans/decides, Sonnet/Haiku code. | (proto outputs) → fed DESIGN-CONCEPT |
 | `fd4a7529` | 06-04 ~11:37 (resumed 06-05) | **The big one (717 turns).** Phase-2 grill of the plan; built a knowledge-graph of the OLD codebase → **`docs/CODEBASE-ATLAS.md`**; foundations research (offloaded to Sonnet) → **`REWRITE-FOUNDATIONS.md`**; **ADR-0004 agent core** + PRD reconcile. | `session-handoff.md` + `prototype-handoff.md` → 1d8bbe45 / 23c94aea |

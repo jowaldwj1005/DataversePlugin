@@ -58,5 +58,5 @@ Reactivity is `@lit-labs/signals` / `@preact/signals-core` (~1–2 kB), no frame
 **Open follow-ups:**
 - **ADR-0003 (UX)** locks accent + exact shell layout (rail width, dock collapse) — this ADR fixes only the state/lifecycle skeleton beneath it.
 - Motion/transition policy for mount/unmount and Agent hand-off (DESIGN-CONCEPT §9).
-- Whether the shell store + lifecycle warrant a companion `SHELL.md` design doc (as `AGENT-CORE.md` backs ADR-0004) — defer until Slice 0 implementation pressure decides.
+- A companion `SHELL.md` design doc (as `AGENT-CORE.md` backs ADR-0004) — **decided: yes** (owner, 2026-06-06); authored when Slice 0 implementation starts.
 - Validated against the spine in **Slice 0**; revise here if the signals-rehydrate cost on a real heavy Module forces a wider keep-warm set.
