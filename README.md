@@ -1,5 +1,7 @@
 # Dataverse Chrome Plugin
 
+> ⚠️ **Legacy project. Wird nicht weiter gepflegt/entwickelt.**
+
 AI-native Developer Toolkit for Dynamics 365 — BYOK Agent with full plugin access, ERD Viewer, Skill Sharing.
 
 Open Source (MIT) · Chrome Extension · Zero Dependencies · No Backend
